@@ -1,0 +1,29 @@
+namespace gabber_chat_lib {
+    // Initialize the database
+    void init_database();
+
+    // User management
+    [Throws=DatabaseError]
+    void create_user(string name, string public_key);
+
+    // Group management
+    [Throws=DatabaseError]
+    void create_group(string name, string creator_id);
+
+    // Message management
+    [Throws=DatabaseError]
+    void send_message(string sender, string receiver, string content);
+
+    // Sync with a peer
+    sequence<string> sync_with_peer(string peer_id);
+
+    // Mark messages as seen
+    boolean mark_messages_as_seen(sequence<string> message_ids);
+};
+
+[Error]
+enum DatabaseError {
+    "InitializationError",
+    "StorageError",
+    "SyncError"
+};
