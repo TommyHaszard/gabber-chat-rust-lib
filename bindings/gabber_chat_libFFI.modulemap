@@ -1,4 +1,0 @@
-module gabber_chat_libFFI {
-    header "gabber_chat_libFFI.h"
-    export *
-}
