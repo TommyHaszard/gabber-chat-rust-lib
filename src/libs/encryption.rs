@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::ptr::write;
-use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret, StaticSecret};
+use chacha20poly1305::aead::{Aead, Payload};
+use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
+use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use hkdf::Hkdf;
-use hmac::digest::Key;
+use hmac::digest::{Key, KeyInit};
 // Implementation of Signals Double Ratchet Algorithm with x25519_dalek
 // https://signal.org/docs/specifications/doubleratchet
 
@@ -16,23 +18,46 @@ type MessageId = u32;
 
 type KeySecret = [u8; 32];
 
+type CipherText = Vec<u8>;
+
 // Create alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
 
 // Store skipped message keys -> Using the PublicKey and the message number
-#[derive(Debug)]
 struct KeyStore(HashMap<PublicKey, HashMap<MessageId, SharedSecret>>);
+
+impl fmt::Debug for KeyStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut map = f.debug_map();
+        for (public_key, messages) in &self.0 {
+            let redacted_map: HashMap<_, _> = messages
+                .keys()
+                .map(|msg_id| (msg_id, "[REDACTED]"))
+                .collect();
+
+            map.entry(&public_key, &redacted_map);
+        }
+        map.finish()
+    }
+}
 
 pub const DEFAULT_MAX_SKIP: usize = 1000;
 const HKDF_INFO_ROOT_KEY: &[u8] = b"ROOT_KEY";
 const HKDF_INFO_CHAIN_KEY: &[u8] = b"CHAIN_KEY";
 const HKDF_INFO_HEADER_KEY: &[u8] = b"HEADER_KEY";
+const HKDF_INFO_ENCRYPTION_KEY: &[u8] = b"ENCRYPTION_KEY";
+const KEY_SECRET_LEN: usize = 32;
+
+
 // Custom error type for key derivation operations
+
 #[derive(Debug)]
 pub enum DoubleRatchetError {
     HmacError(String),
     OutputSizeError(String),
-    HkdfError(String)
+    HkdfError(String),
+    AeadError(String),
+    InvalidLength(String)
 }
 
 // Using a StaticSecret instead of Ephemeral
@@ -67,6 +92,16 @@ struct MessageHeader {
     dh_public_key: PublicKey,
     count: Counter,
     previous_count: Counter,
+}
+
+impl MessageHeader {
+    fn init(dh_public_key: PublicKey, count: Counter, previous_count: Counter) -> MessageHeader{
+        Self {
+            dh_public_key,
+            count,
+            previous_count
+        }
+    }
 }
 
 struct DoubleRatchet {
@@ -130,6 +165,19 @@ impl DoubleRatchet {
             max_skip: 0,
         };
     }
+
+    pub fn ratchet_encrypt(&mut self, plaintext: &[u8], associated_data: &[u8]) -> Result<(MessageHeader, Vec<u8>), DoubleRatchetError> {
+        // cannot run if self is not initialised
+
+        let (new_chain_key, message_key) = kdf_ck(&self.send_chain_key.unwrap())?;
+        let header = MessageHeader::init(self.dhs.public.clone(), self.prev_number.clone(), self.send_count.clone());
+
+        self.send_count += 1;
+
+        let cipher_text = encrypt(&message_key, &plaintext, &associated_data)?;
+
+        Ok((header, cipher_text))
+    }
 }
 
 // KDF_RK(rk, dh_out): This function is recommended to be implemented using HKDF
@@ -139,7 +187,7 @@ impl DoubleRatchet {
 fn kdf_rk(root_key: KeySecret, dh: &SharedSecret) -> Result<(KeySecret, KeySecret, KeySecret), DoubleRatchetError> {
     // Use HKDF with the root key as salt
     let dh_out = dh.as_bytes();
-    let hkdf = Hkdf::<Sha256>::new(Some(&*root_key), dh_out);
+    let hkdf = Hkdf::<Sha256>::new(Some(&root_key), dh_out);
 
     // Derive the new keys
     let mut new_root_key = [0u8; 32];
@@ -164,31 +212,80 @@ fn kdf_rk(root_key: KeySecret, dh: &SharedSecret) -> Result<(KeySecret, KeySecre
 // message key, and a single byte 0x02 as input to produce the next chain key).
 fn kdf_ck(chain_key: &KeySecret) -> Result<(KeySecret, KeySecret), DoubleRatchetError> {
 
-    let mut message_key: KeySecret = [0u8; KeySecret::LEN];
-    let mut next_chain_key: KeySecret = [0u8; KeySecret::LEN];
+    let mut message_key: KeySecret = [0u8; KEY_SECRET_LEN];
+    let mut next_chain_key: KeySecret = [0u8; KEY_SECRET_LEN];
 
     // Derive message key using input constant 0x01
-    let mut mac = HmacSha256::new_from_slice(chain_key)
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(chain_key)
         .map_err(|e| DoubleRatchetError::HmacError(e.to_string()))?;
     mac.update(&[0x01]);
     let message_key_result = mac.finalize();
 
     // Derive next chain key using input constant 0x02
-    let mut mac = HmacSha256::new_from_slice(chain_key)
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(chain_key)
         .map_err(|e| DoubleRatchetError::HmacError(e.to_string()))?;
 
     mac.update(&[0x02]);
     let next_chain_key_result = mac.finalize();
 
-    message_key.copy_from_slice(&message_key_result.into_bytes()[..KeySecret::LEN]);
-    next_chain_key.copy_from_slice(&next_chain_key_result.into_bytes()[..KeySecret::LEN]);
+    message_key.copy_from_slice(&message_key_result.into_bytes()[..KEY_SECRET_LEN]);
+    next_chain_key.copy_from_slice(&next_chain_key_result.into_bytes()[..KEY_SECRET_LEN]);
 
     Ok((message_key, next_chain_key))
 }
 
+// Encryption function without randomly generating a nonce, so it is not included in the message to
+// the receiver. This is safe as the message key is only used once per message, therefore we can
+// deterministically regenerate the nonce using the message key without it being unsafe.
+fn encrypt(message_key: &KeySecret, plaintext: &[u8], associated_data: &[u8]) -> Result<CipherText, DoubleRatchetError> {
+    let (key_bytes, nonce_bytes) = derive_hkdf_key_and_nonce(message_key)?;
 
-fn generate_dh_pair() -> DHKeyPair {
-    todo!()
+    let key = chacha20poly1305::Key::from_slice(&key_bytes);
+    let cipher = ChaCha20Poly1305::new(key);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    // Encrypt the plaintext
+    let ciphertext = cipher
+        .encrypt(nonce,
+                 Payload {
+                    msg: plaintext,
+                    aad: associated_data,
+                })
+        .map_err(|e| DoubleRatchetError::AeadError(e.to_string()))?;
+
+    Ok(ciphertext)
+}
+
+fn decrypt(message_key: &KeySecret, cipher_text: &CipherText, associated_data: &[u8]) -> Result<CipherText, DoubleRatchetError> {
+    let (key_bytes, nonce_bytes) = derive_hkdf_key_and_nonce(message_key)?;
+
+    let key = chacha20poly1305::Key::from_slice(&key_bytes);
+    let cipher = ChaCha20Poly1305::new(key);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let plain_text = cipher
+        .decrypt(nonce,
+                 Payload {
+                     msg: cipher_text,
+                     aad: associated_data,
+                 })
+        .map_err(|e| DoubleRatchetError::AeadError(e.to_string()))?;
+
+    Ok(plain_text)
+}
+
+fn derive_hkdf_key_and_nonce(message_key: &KeySecret) -> Result<([u8; 32], [u8; 12]), DoubleRatchetError> {
+    // Use HKDF to derive encryption key and nonce from message key
+    let salt = vec![0u8; Sha256::output_size()];
+    let h = Hkdf::<Sha256>::new(Some(&salt), message_key);
+
+    let mut key_bytes = [0u8; 32]; // 256-bit key for ChaCha20Poly1305
+    let mut nonce_bytes = [0u8; 12]; // 96-bit nonce
+    let mut okm = [0u8; 44]; // 352-bit output key material
+    h.expand(HKDF_INFO_ENCRYPTION_KEY, &mut okm).map_err(|e| DoubleRatchetError::InvalidLength(e.to_string()))?;
+
+    key_bytes.copy_from_slice(&okm[..32]);
+    nonce_bytes.copy_from_slice(&okm[32..]);
+    Ok((key_bytes, nonce_bytes))
 }
 
 impl fmt::Debug for DoubleRatchet {
@@ -217,6 +314,21 @@ impl fmt::Debug for DoubleRatchet {
 
 #[cfg(test)]
 mod tests {
+    use crate::libs::encryption::*;
+
+    #[test]
+    fn test_encryption_decryption() {
+        let mk = b"super_secret_master_key_32_bytes";
+        let plaintext = b"Encrypt this message!";
+        let aad = b"metadata";
+
+        let ct = encrypt(mk, plaintext, aad).unwrap();
+        println!("Ciphertext: {:?}", ct);
+
+        let pt = decrypt(mk, &ct, aad).unwrap();
+        println!("Decrypted: {:?}", String::from_utf8(pt.clone()));
+        assert_eq!(pt, plaintext);
+    }
 
     #[test]
     fn test_gen_user_key() {
