@@ -1,5 +1,4 @@
-mod libs;
-
+pub mod libs;
 use std::error::Error;
 use std::fmt;
 
@@ -49,6 +48,10 @@ pub fn sync_with_peer(peer_id: String) -> Vec<String> {
 
 pub fn mark_messages_as_seen(message_ids: Vec<String>) -> bool {
     sync::mark_messages_as_seen(message_ids)
+}
+
+pub fn initialise_two_friend_nodes() -> bool {
+    todo!()
 }
 
 #[cfg(test)]
