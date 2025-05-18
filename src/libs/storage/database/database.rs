@@ -1,0 +1,152 @@
+use rusqlite::{Connection, Result};
+use std::sync::{Mutex, Once, OnceLock};
+use once_cell::sync::Lazy;
+use crate::DatabaseError;
+
+static INIT: Once = Once::new();
+static DB_PATH: OnceLock<String> = OnceLock::new();
+
+pub fn get_db_path() -> &'static str {
+    DB_PATH.get().expect("Database path not initialized")
+}
+
+pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
+    let mut initialized = false;
+    INIT.call_once(|| {
+        DB_PATH.set(path).expect("Database path can only be set once");
+        let conn = Connection::open(get_db_path()).expect("Failed to open database");
+
+        conn.execute("PRAGMA foreign_keys = ON", []).expect("Failed to enforce foreign keys constraints.");
+
+        // Create Groups table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    public_key BLOB,
+                    is_stale BOOLEAN NOT NULL DEFAULT false
+            );",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        // messages that have either been decrypted or before they are encrypted and sent
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS messages (
+                message_id TEXT PRIMARY KEY,
+                recipient_id TEXT NOT NULL,
+                message_type TEXT NOT NULL,
+                content BLOB NOT NULL,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+
+                CHECK (message_type IN ('normal_message', 'initialisation_message'))
+            );",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS devices (
+                    user_id TEXT NOT NULL,
+                    device_id TEXT NOT NULL,
+                    public_key BLOB,
+                    bluetooth_id TEXT NOT NULL UNIQUE,
+                    identity_key_pair BLOB NOT NULL,
+                    is_stale BOOLEAN NOT NULL DEFAULT false,
+
+                    PRIMARY KEY (user_id, device_id),
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                );",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    remote_device_id TEXT NOT NULL,
+                    remote_user_id TEXT NOT NULL,
+                    session_record BLOB,
+                    is_active_session BOOLEAN NOT NULL DEFAULT false,
+                    inactive_order INTEGER,
+
+                    --FOREIGN KEY (remote_device_id) REFERENCES devices(user_id, device_id) ON DELETE CASCADE,
+                    FOREIGN KEY (remote_user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                );",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute_batch(
+            r#"CREATE TABLE IF NOT EXISTS symmetric_chain_records (
+                record_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                chain_identifier TEXT NOT NULL,
+                chain_key BLOB NOT NULL,
+                message_count INTEGER NOT NULL,
+                skipped_keys_data BLOB NOT NULL,
+                last_updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_symmetric_chain_records_session_id
+                ON symmetric_chain_records (session_id);
+            "#,
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+                );",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES
+                    ('max_relay_hops', '3'),
+                    ('bluetooth_discovery_interval', '300'),
+                    ('message_retention_days', '90'),
+                    ('app_version', '0.0.1');",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS update_conversation_timestamp
+                AFTER INSERT ON Messages
+                BEGIN
+                    UPDATE Conversations
+                    SET updated_at = strftime('%s', 'now'),
+                        last_message_preview = NEW.content,
+                        unread_count = CASE
+                                            WHEN NEW.is_outgoing = 0 THEN unread_count + 1
+                                            ELSE unread_count
+                                        END
+                    WHERE conversation_id = NEW.conversation_id;
+                END;",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS cleanup_old_messages
+                AFTER UPDATE ON app_settings
+                WHEN NEW.key = 'message_retention_days'
+                BEGIN
+                    DELETE FROM Messages
+                    WHERE created_at < strftime('%s', 'now') - (NEW.value * 86400)
+                    AND conversation_id NOT IN (SELECT conversation_id FROM Conversations WHERE is_pinned = 1);
+                END;",
+            [],
+        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
+
+        initialized = true;
+    });
+
+    if initialized {
+        Ok(())
+    } else {
+        let conn = Connection::open(get_db_path()).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+        // Just verify the connection works
+        conn.execute("SELECT 1", []).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+        Ok(())
+    }
+}

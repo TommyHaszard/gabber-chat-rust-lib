@@ -4,15 +4,11 @@ namespace gabber_chat_lib {
 
     // User management
     [Throws=DatabaseError]
-    void create_user(string name, string public_key);
-
-    // Group management
-    [Throws=DatabaseError]
-    void create_group(string name, string creator_id);
+    void create_user(string name, sequence<u8> public_key);
 
     // Message management
     [Throws=DatabaseError]
-    void send_message(string sender, string receiver, string content);
+    void send_message(string receiver, string content);
 
     // Sync with a peer
     sequence<string> sync_with_peer(string peer_id);
@@ -25,5 +21,7 @@ namespace gabber_chat_lib {
 enum DatabaseError {
     "InitializationError",
     "StorageError",
-    "SyncError"
+    "SyncError",
+    "RetrievalError",
+    "InvalidLength",
 };

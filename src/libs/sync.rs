@@ -1,7 +1,7 @@
 use rusqlite::{Connection, params};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::database::get_db_path;
+use crate::libs::storage::database::database::get_db_path;
 
 pub fn fetch_unsynced_messages(peer_id: &str) -> Vec<String> {
     let mut conn = match Connection::open(get_db_path()) {
