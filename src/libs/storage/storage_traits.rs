@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::fmt;
+use r2d2::PooledConnection;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use uuid::Uuid;
 use crate::DatabaseError;
@@ -42,7 +44,6 @@ pub trait Storage {
     type Transaction<'s>: Transactional + ProtocolStore + 's
     where
         Self: 's;
-    fn get_transaction(&self) -> Self::Transaction;
 }
 
 pub trait Transactional {

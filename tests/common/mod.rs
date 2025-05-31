@@ -5,11 +5,12 @@ use std::sync::Once;
 
 use gabber_chat_lib::init_database;
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
-use gabber_chat_lib::libs::storage::database::database::get_db_path;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use rusqlite::Connection;
 use std::path::Path;
+use gabber_chat_lib::libs::storage::database::database::DATABASE;
+use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
 
 pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
     init.call_once(|| {
@@ -30,8 +31,11 @@ pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
 }
 
 pub fn cleanup_test_db() {
-    let conn = Connection::open(get_db_path()).expect("Failed to open database");
-    conn.execute_batch(
+    let database_pool= DATABASE.get().unwrap();
+    let mut connection = database_pool.new_connection().unwrap();
+
+    let mut sqlite_transaction = SqliteTransaction::new(&mut connection).expect("Failed to create transaction.");
+    sqlite_transaction.inner().execute_batch(
             r#"
             DELETE FROM messages;
             DELETE FROM sessions;

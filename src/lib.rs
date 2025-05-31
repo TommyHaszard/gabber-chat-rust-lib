@@ -1,13 +1,13 @@
 pub mod libs;
-use crate::libs::storage::database::database::get_db_path;
-use crate::libs::storage::database::storage_sqllite::SqliteStore;
+use crate::libs::storage::database::storage_sqllite::{SqliteStore, SqliteTransaction};
 use crate::libs::storage::database::{database, storage_sqllite};
-use crate::libs::storage::storage_traits::UserStore;
+use crate::libs::storage::storage_traits::{Storage, UserStore};
 use crate::libs::*;
 use rusqlite::Connection;
 use std::error::Error;
 use std::fmt;
 use std::fmt::write;
+use crate::libs::storage::database::database::DATABASE;
 
 uniffi::include_scaffolding!("gabber_chat_lib");
 
@@ -43,11 +43,16 @@ pub fn init_database(path: String) {
 }
 
 pub fn create_user(name: String, public_key: Vec<u8>) -> Result<(), DatabaseError> {
-    let conn = Connection::open(get_db_path()).expect("Failed to open database");
+    let database_pool= DATABASE.get().unwrap();
+    let mut connection = database_pool.new_connection().unwrap();
+
+    let mut sqlite_transaction = SqliteTransaction::new(&mut connection)
+        .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err))).unwrap();
+    // Just verify the connection works
     if public_key.len() != 32 {
         return Err(DatabaseError::InvalidLength(32, public_key.len()));
     }
-    SqliteStore::create_user(&conn, name, public_key.try_into().unwrap())
+    sqlite_transaction.create_user( name, public_key.try_into().unwrap())
         .map_err(|e| DatabaseError::RetrievalError(e.to_string()))?;
     Ok(())
 }
@@ -60,11 +65,11 @@ pub fn send_message(
 }
 
 pub fn sync_with_peer(peer_id: String) -> Vec<String> {
-    sync::fetch_unsynced_messages(&peer_id)
+    todo!()
 }
 
 pub fn mark_messages_as_seen(message_ids: Vec<String>) -> bool {
-    sync::mark_messages_as_seen(message_ids)
+    todo!()
 }
 
 pub fn initialise_two_friend_nodes() -> bool {

@@ -1,25 +1,31 @@
+use std::cell::OnceCell;
 use rusqlite::{Connection, Result};
 use std::sync::{Mutex, Once, OnceLock};
-use once_cell::sync::Lazy;
+
 use crate::DatabaseError;
+use crate::libs::storage::database::storage_sqllite::{SqliteStore, SqliteTransaction};
+use crate::libs::storage::storage_traits::Storage;
 
 static INIT: Once = Once::new();
-static DB_PATH: OnceLock<String> = OnceLock::new();
-
-pub fn get_db_path() -> &'static str {
-    DB_PATH.get().expect("Database path not initialized")
-}
+pub static DATABASE: OnceLock<SqliteStore> = OnceLock::new();
 
 pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
     let mut initialized = false;
     INIT.call_once(|| {
-        DB_PATH.set(path).expect("Database path can only be set once");
-        let conn = Connection::open(get_db_path()).expect("Failed to open database");
+        //DB_PATH.set(path).expect("Database path can only be set once");
+        // let conn = Connection::open(get_db_path()).expect("Failed to open database");
+        let db_store = SqliteStore::new(&path);
+        DATABASE.set(db_store).map_err(|err| DatabaseError::InitializationError(format!("{:?}", err))).unwrap();
 
-        conn.execute("PRAGMA foreign_keys = ON", []).expect("Failed to enforce foreign keys constraints.");
+        let database_pool= DATABASE.get().unwrap();
+        let mut connection = database_pool.new_connection().unwrap();
 
-        // Create Groups table
-        conn.execute(
+        let sqlite_transaction = SqliteTransaction::new(&mut connection)
+            .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err))).unwrap();
+
+        sqlite_transaction.inner().execute("PRAGMA foreign_keys = ON", []).expect("Failed to enforce foreign keys constraints.");
+
+        sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS users (
                     user_id TEXT PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
@@ -30,7 +36,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
         // messages that have either been decrypted or before they are encrypted and sent
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS messages (
                 message_id TEXT PRIMARY KEY,
                 recipient_id TEXT NOT NULL,
@@ -43,7 +49,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS devices (
                     user_id TEXT NOT NULL,
                     device_id TEXT NOT NULL,
@@ -58,7 +64,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
                     remote_device_id TEXT NOT NULL,
@@ -73,7 +79,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute_batch(
+        sqlite_transaction.inner().execute_batch(
             r#"CREATE TABLE IF NOT EXISTS symmetric_chain_records (
                 record_id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -91,7 +97,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             "#,
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL,
@@ -100,7 +106,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "INSERT INTO app_settings (key, value) VALUES
                     ('max_relay_hops', '3'),
                     ('bluetooth_discovery_interval', '300'),
@@ -109,7 +115,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TRIGGER IF NOT EXISTS update_conversation_timestamp
                 AFTER INSERT ON Messages
                 BEGIN
@@ -126,7 +132,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
 
-        conn.execute(
+        sqlite_transaction.inner().execute(
             "CREATE TRIGGER IF NOT EXISTS cleanup_old_messages
                 AFTER UPDATE ON app_settings
                 WHEN NEW.key = 'message_retention_days'
@@ -144,9 +150,13 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
     if initialized {
         Ok(())
     } else {
-        let conn = Connection::open(get_db_path()).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+        let database_pool= DATABASE.get().unwrap();
+        let mut connection = database_pool.new_connection().unwrap();
+
+        let sqlite_transaction = SqliteTransaction::new(&mut connection)
+            .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err))).unwrap();
         // Just verify the connection works
-        conn.execute("SELECT 1", []).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+        sqlite_transaction.inner().execute("SELECT 1", []).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
         Ok(())
     }
 }
