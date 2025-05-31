@@ -1,7 +1,6 @@
 use crate::libs::encryption::double_ratchet::{
     DHKeyGenerator, DHKeyPair, DoubleRatchet, KeySecret,
 };
-use crate::libs::models::User;
 use crate::libs::storage::records::{SessionRecord, UserRecord};
 use hmac::digest::Key;
 use std::array::TryFromSliceError;

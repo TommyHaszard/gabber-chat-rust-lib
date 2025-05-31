@@ -1,47 +1,76 @@
 use crate::libs::chat_initalisation::IdentityKey;
 use crate::libs::encryption::double_ratchet::{KeySecret, MessageId, SymmetricChainState};
-use crate::libs::storage::database::database::get_db_path;
+use crate::libs::storage::database::database::{get_db_path};
 use crate::libs::storage::records::{SessionRecord, UserRecord};
-use crate::libs::storage::storage_traits::{
-    ProtocolStore, SessionStore, StoreError, SymmetricChainStore, UserStore,
-};
+use crate::libs::storage::storage_traits::{SessionStore, Storage, StoreError, SymmetricChainStore, Transactional, UserStore};
 use crate::DatabaseError;
 use bincode::config::standard;
-use rusqlite::{params, Connection, OptionalExtension, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use r2d2::{Pool, PooledConnection};
+use r2d2_sqlite::SqliteConnectionManager;
 use uuid::Uuid;
 
-pub struct SqliteStore {}
+pub struct SqliteTransaction<'conn> {
+    tx: Transaction<'conn>
+}
 
-impl ProtocolStore for SqliteStore {}
+impl<'conn> SqliteTransaction<'conn> {
+    pub fn new(conn_pool: &'conn mut Pool<SqliteConnectionManager>) -> Result<Self> {
+        let trans = conn_pool.transaction()?;
+        Ok(Self { tx: trans })
+    }
+}
+
+impl<'conn> Transactional for SqliteTransaction<'conn> {
+    fn commit(self) -> Result<()> {
+        self.tx.commit()
+    }
+
+    fn rollback(self) -> Result<()> {
+        self.tx.rollback()
+    }
+}
+
+
+pub struct SqliteStore {
+    conn_pool: Pool<SqliteConnectionManager>,
+}
 
 impl SqliteStore {
+    pub fn new() -> Self {
+        let manager = SqliteConnectionManager::file(get_db_path());
+        let pool = Pool::new(manager).unwrap();
+        Self { conn_pool: pool }
+    }
     pub fn generate_chain_record_id(session_id: &str, chain_identifier: &str) -> String {
         format!("{}_{}", session_id, chain_identifier)
     }
 }
 
-impl UserStore for SqliteStore {
-    fn load_user(
-        conn: &Connection,
+impl Storage for SqliteStore {
+    type Transaction<'s> = SqliteTransaction<'s> where Self: 's;
+
+    fn get_transaction(&mut self) -> Self::Transaction {
+        SqliteTransaction::new(&mut self.conn_pool)
+            .expect("Failed to create SQLite transaction")
+    }
+}
+
+
+
+impl<'conn> UserStore for SqliteTransaction<'conn> {
+    fn load_user(&mut self,
         message_from: IdentityKey,
     ) -> std::result::Result<UserRecord, StoreError> {
-        let     conn = Connection::open(get_db_path())
-            .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
-
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
-        let mut stmt = conn.prepare("SELECT data FROM user WHERE userid = ?")?;
+        let mut stmt = self.tx.prepare("SELECT data FROM user WHERE userid = ?")?;
         //let sender_exists  = stmt.query_row([message_from.uuid], |row| row.get::<usize, Vec<u8>>(0)).map_err(|_| DatabaseError::StorageError)?;
         todo!()
     }
 
-    fn store_user(conn: &Connection, record: &UserRecord) -> Result<(), StoreError> {
-        conn.execute(
+    fn store_user(&mut self, record: &UserRecord) -> Result<(), StoreError> {
+        self.tx.execute(
             "INSERT INTO Users (id, name, public_key) VALUES (?1, ?2, ?3)",
             params![
                 record.user_id.uuid.to_string(),
@@ -54,7 +83,7 @@ impl UserStore for SqliteStore {
     }
 
     fn create_user(
-        conn: &Connection,
+        &mut self,
         username: String,
         public_key: [u8; 32],
     ) -> Result<(), StoreError> {
@@ -66,7 +95,7 @@ impl UserStore for SqliteStore {
         //     return Err(StoreError::)
         // }
 
-        conn.execute(
+        self.tx.execute(
             "INSERT INTO Users (user_id, username, public_key) VALUES (?1, ?2, ?3)",
             params![Uuid::now_v7().to_string(), username, public_key],
         )
@@ -75,9 +104,9 @@ impl UserStore for SqliteStore {
     }
 }
 
-impl SessionStore for SqliteStore {
+impl<'conn> SessionStore for SqliteTransaction<'conn> {
     fn load_session(
-        conn: &Connection,
+        &mut self,
         message_from: IdentityKey,
     ) -> std::result::Result<SessionRecord, StoreError> {
         let conn = Connection::open(get_db_path())
@@ -92,8 +121,7 @@ impl SessionStore for SqliteStore {
         todo!()
     }
 
-    fn store_session(
-        conn: &Connection,
+    fn store_session(&mut self,
         record: &SessionRecord,
         message_from: IdentityKey,
     ) -> std::result::Result<(), StoreError> {
@@ -101,9 +129,9 @@ impl SessionStore for SqliteStore {
     }
 }
 
-impl SymmetricChainStore for SqliteStore {
+impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
     fn store_symmetric_chain_state(
-        conn: &Connection,
+        &mut self,
         session_id: &str,
         chain_identifier: &str,
         state: &SymmetricChainState,
@@ -112,7 +140,7 @@ impl SymmetricChainStore for SqliteStore {
         let skipped_keys_data = bincode::encode_to_vec(&state.skipped_keys, standard())
             .map_err(|e| StoreError::SerialisationError(e.to_string()))?;
 
-        conn.execute(
+        self.tx.execute(
             "INSERT OR REPLACE INTO SymmetricChainRecords
          (record_id, session_id, chain_identifier, chain_key, message_count, skipped_keys_data, last_updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now'))",
@@ -129,13 +157,13 @@ impl SymmetricChainStore for SqliteStore {
     }
 
     fn load_symmetric_chain_state(
-        conn: &Connection,
+        &mut self,
         session_id: &str,
         chain_identifier: &str,
     ) -> std::result::Result<Option<SymmetricChainState>, StoreError> {
         let record_id = Self::generate_chain_record_id(session_id, chain_identifier);
 
-        let result = conn
+        let result = self.tx
             .query_row(
                 "SELECT chain_key, message_count, skipped_keys_data
              FROM SymmetricChainRecords

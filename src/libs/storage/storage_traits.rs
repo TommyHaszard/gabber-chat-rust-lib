@@ -38,21 +38,34 @@ impl From<DatabaseError> for StoreError {
     }
 }
 
+pub trait Storage {
+    type Transaction<'s>: Transactional + ProtocolStore + 's
+    where
+        Self: 's;
+    fn get_transaction(&self) -> Self::Transaction;
+}
+
+pub trait Transactional {
+    fn commit(self) -> Result<(), StoreError>;
+    fn rollback(self) -> Result<(), StoreError>;
+}
+
+
 pub trait UserStore {
-    fn load_user(conn: &Connection, message_from: IdentityKey)-> Result<UserRecord, StoreError>;
+    fn load_user(&mut self, message_from: IdentityKey)-> Result<UserRecord, StoreError>;
 
     fn store_user(
-        conn: &Connection,
+        &mut self,
         record: &UserRecord,
     ) -> Result<(), StoreError>;
-    fn create_user(conn: &Connection, username: String, public_key: [u8; 32]) -> std::result::Result<(), StoreError>;
+    fn create_user(&mut self, username: String, public_key: [u8; 32]) -> Result<(), StoreError>;
 }
 
 pub trait SessionStore {
-    fn load_session(conn: &Connection, message_from: IdentityKey)-> Result<SessionRecord, StoreError>;
+    fn load_session(&mut self, message_from: IdentityKey)-> Result<SessionRecord, StoreError>;
 
     fn store_session(
-        conn: &Connection,
+        &mut self,
         record: &SessionRecord,
         message_from: IdentityKey
     ) -> Result<(), StoreError>;
@@ -60,14 +73,14 @@ pub trait SessionStore {
 
 pub trait SymmetricChainStore {
     fn store_symmetric_chain_state(
-        conn: &Connection,
+        &mut self,
         session_id: &str,
         chain_identifier: &str,
         state: &SymmetricChainState,
     ) -> Result<(), StoreError>;
 
     fn load_symmetric_chain_state(
-        conn: &Connection,
+        &mut self,
         session_id: &str,
         chain_identifier: &str,
     ) -> Result<Option<SymmetricChainState>, StoreError>;

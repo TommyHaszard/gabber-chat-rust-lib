@@ -11,7 +11,6 @@ use std::fmt::{format, Debug, Formatter};
 use std::ptr::write;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
 use crate::libs::encryption::double_ratchet::{concat_header_and_ad, decrypt, derive_hkdf_key_and_nonce, encrypt, kdf_ck, kdf_rk, DHKeyPair, DoubleRatchetError, MessageHeader};
-use crate::libs::models::Message;
 // Implementation of Signals Double Ratchet Algorithm with x25519_dalek
 // https://signal.org/docs/specifications/doubleratchet
 
