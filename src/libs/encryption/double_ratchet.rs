@@ -61,8 +61,6 @@ pub struct SessionChainManager {
     pub receiving_chains: HashMap<[u8; 32], SymmetricChainState>,
 }
 
-
-
 // Custom error type for key derivation operations
 
 #[derive(Debug)]
@@ -80,7 +78,7 @@ pub enum DoubleRatchetError {
 }
 
 // Using a StaticSecret instead of Ephemeral
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DHKeyPair {
     pub private: StaticSecret,
     pub public: PublicKey,
@@ -153,7 +151,7 @@ impl MessageHeader {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DoubleRatchet {
     // Keys
     root_key: KeySecret,
@@ -206,7 +204,6 @@ impl DoubleRatchet {
         dh_pair: DHKeyPair,
         cks: Option<KeySecret>,
     ) -> Self {
-
         let mut chain_manager = SessionChainManager::default();
 
         Self {
@@ -244,11 +241,19 @@ impl DoubleRatchet {
             return Err(DoubleRatchetError::NotInitialized);
         }
 
-        let sending_chain_state = self.chain_manager.sending_chain.as_mut().ok_or_else(|| DoubleRatchetError::InvalidState("Sending chain not initialized, but DHR is present.".to_string()))?;
+        let sending_chain_state = self.chain_manager.sending_chain.as_mut().ok_or_else(|| {
+            DoubleRatchetError::InvalidState(
+                "Sending chain not initialized, but DHR is present.".to_string(),
+            )
+        })?;
 
         let (next_cks, message_key) = kdf_ck(&sending_chain_state.chain_key)?;
         sending_chain_state.chain_key = next_cks;
-        let header = MessageHeader::init(self.dhs.public, self.prev_number, sending_chain_state.message_count);
+        let header = MessageHeader::init(
+            self.dhs.public,
+            self.prev_number,
+            sending_chain_state.message_count,
+        );
 
         sending_chain_state.message_count += 1;
 
@@ -268,7 +273,7 @@ impl DoubleRatchet {
         dh_key_generator: &mut DHKeyGen,
     ) -> Result<Vec<u8>, DoubleRatchetError>
     where
-        DHKeyGen: DHKeyGenerator
+        DHKeyGen: DHKeyGenerator,
     {
         if let Some(plain_text) =
             self.try_skipped_message_keys(&header, cipher_text, associated_data)?
@@ -277,21 +282,41 @@ impl DoubleRatchet {
         }
 
         if Some(&header.dh_public_key) != self.dhr.as_ref() {
-            if let Some(old_dhr) = self.dhr { // If there was an old DHR
-                if let Some(old_recv_chain) =
-                    self.chain_manager.receiving_chains.get_mut(old_dhr.as_bytes()) {
+            if let Some(old_dhr) = self.dhr {
+                // If there was an old DHR
+                if let Some(old_recv_chain) = self
+                    .chain_manager
+                    .receiving_chains
+                    .get_mut(old_dhr.as_bytes())
+                {
                     // This skip is on the *old* chain, before it's replaced by dh_ratchet
-                    Self::skip_message_keys_for_chain(self.max_skip, old_recv_chain, header.prev_chain_number, &old_dhr)?;
+                    Self::skip_message_keys_for_chain(
+                        self.max_skip,
+                        old_recv_chain,
+                        header.prev_chain_number,
+                        &old_dhr,
+                    )?;
                 }
             }
             self.dh_ratchet(&header, dh_key_generator);
         }
 
-        let current_recv_chain_state =
-            self.chain_manager.receiving_chains.get_mut(header.dh_public_key.as_bytes())
-            .ok_or_else(|| DoubleRatchetError::InvalidState("Receiving chain not found after DH ratchet.".to_string()))?;
+        let current_recv_chain_state = self
+            .chain_manager
+            .receiving_chains
+            .get_mut(header.dh_public_key.as_bytes())
+            .ok_or_else(|| {
+                DoubleRatchetError::InvalidState(
+                    "Receiving chain not found after DH ratchet.".to_string(),
+                )
+            })?;
 
-        Self::skip_message_keys_for_chain(self.max_skip, current_recv_chain_state, header.message_number, &header.dh_public_key)?;
+        Self::skip_message_keys_for_chain(
+            self.max_skip,
+            current_recv_chain_state,
+            header.message_number,
+            &header.dh_public_key,
+        )?;
         let (next_ckr, message_key) = kdf_ck(&current_recv_chain_state.chain_key)?;
         current_recv_chain_state.chain_key = next_ckr;
         current_recv_chain_state.message_count += 1;
@@ -309,18 +334,20 @@ impl DoubleRatchet {
         chain_dh_public_key: &PublicKey,
     ) -> Result<(), DoubleRatchetError> {
         if chain_state.message_count.saturating_add(max_skip) < until_message_number {
-           return Err(DoubleRatchetError::CannotPerformMaxSkip(format!(
+            return Err(DoubleRatchetError::CannotPerformMaxSkip(format!(
                 "Skipping too many messages for chain {:?}: current_count={}, max_skip={}, trying_to_skip_until={}",
                 chain_dh_public_key.as_bytes(), // For identification
                 chain_state.message_count,
                 max_skip,
                 until_message_number
-            )))
+            )));
         }
         while chain_state.message_count < until_message_number {
             let (next_chain_key, message_key) = kdf_ck(&chain_state.chain_key)?;
             chain_state.chain_key = next_chain_key;
-            chain_state.skipped_keys.insert(chain_state.message_count, message_key);
+            chain_state
+                .skipped_keys
+                .insert(chain_state.message_count, message_key);
             chain_state.message_count += 1;
         }
         Ok(())
@@ -334,7 +361,11 @@ impl DoubleRatchet {
     ) -> Result<Option<Vec<u8>>, DoubleRatchetError> {
         let chain_dh_pk_bytes = *header.dh_public_key.as_bytes();
 
-        if let Some(chain_state) = self.chain_manager.receiving_chains.get_mut(&chain_dh_pk_bytes) {
+        if let Some(chain_state) = self
+            .chain_manager
+            .receiving_chains
+            .get_mut(&chain_dh_pk_bytes)
+        {
             if let Some(mk) = chain_state.skipped_keys.remove(&header.message_number) {
                 let header_serialised = header.serialise_header();
                 let concat_ad = concat_header_and_ad(associated_data, header_serialised.as_slice());
@@ -345,9 +376,13 @@ impl DoubleRatchet {
         Ok(None)
     }
 
-    fn dh_ratchet<DHKeyGen>(&mut self, header: &MessageHeader, dh_key_generator: &mut DHKeyGen) -> Result<(), DoubleRatchetError>
+    fn dh_ratchet<DHKeyGen>(
+        &mut self,
+        header: &MessageHeader,
+        dh_key_generator: &mut DHKeyGen,
+    ) -> Result<(), DoubleRatchetError>
     where
-        DHKeyGen: DHKeyGenerator
+        DHKeyGen: DHKeyGenerator,
     {
         self.prev_number = self
             .chain_manager
@@ -518,11 +553,7 @@ impl fmt::Debug for DoubleRatchet {
             f,
             "DoubleRatchet {{ Alice_Key_Pair: {:?}, Bobby_Public_Key: {:?}, Root_Key: {:?},
             Send_Chain_Key: {:?}, Recv_Chain_Key: {:?}}}",
-            self.dhs,
-            self.dhr,
-            self.root_key,
-            self.prev_number,
-            self.chain_manager,
+            self.dhs, self.dhr, self.root_key, self.prev_number, self.chain_manager,
         )
     }
 }

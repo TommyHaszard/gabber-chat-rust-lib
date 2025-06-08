@@ -1,25 +1,33 @@
-use crate::libs::chat_initalisation::IdentityKey;
-use crate::libs::encryption::double_ratchet::{KeySecret, MessageId, SymmetricChainState};
-use crate::libs::storage::records::{SessionRecord, UserRecord};
-use crate::libs::storage::storage_traits::{ProtocolStore, SessionStore, Storage, StoreError, SymmetricChainStore, Transactional, UserStore};
+use crate::libs::encryption::double_ratchet::{
+    DoubleRatchet, KeySecret, MessageId, SymmetricChainState,
+};
+use crate::libs::models::{IdentityKey, MessageType};
+use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
+use crate::libs::storage::storage_traits::{
+    MessageStore, ProtocolStore, SessionStore, Storage, StoreError, SymmetricChainStore,
+    Transactional, UserStore,
+};
 use crate::DatabaseError;
 use bincode::config::standard;
-use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::fallible_iterator::FallibleIterator;
+use rusqlite::{params, Connection, Error, OptionalExtension, Result, Transaction};
+use std::collections::HashMap;
 use uuid::Uuid;
+use x25519_dalek::PublicKey;
 
 pub struct SqliteTransaction<'conn> {
-    tx: Transaction<'conn>
+    tx: Transaction<'conn>,
 }
 
 impl<'conn> SqliteTransaction<'conn> {
-    pub fn new(conn: &'conn mut PooledConnection<SqliteConnectionManager>) -> Result<Self, StoreError> {
+    pub fn new(
+        conn: &'conn mut PooledConnection<SqliteConnectionManager>,
+    ) -> Result<Self, StoreError> {
         let trans = conn
             .transaction()
-            .map_err(|e| StoreError::Sqlite(e.to_string()))?;
+            .map_err(|e| StoreError::SqliteError(e.to_string()))?;
         Ok(Self { tx: trans })
     }
 
@@ -30,14 +38,17 @@ impl<'conn> SqliteTransaction<'conn> {
 
 impl<'conn> Transactional for SqliteTransaction<'conn> {
     fn commit(self) -> Result<(), StoreError> {
-        self.tx.commit().map_err(|e| StoreError::Sqlite(e.to_string()))
+        self.tx
+            .commit()
+            .map_err(|e| StoreError::SqliteError(e.to_string()))
     }
 
     fn rollback(self) -> Result<(), StoreError> {
-        self.tx.rollback().map_err(|e| StoreError::Sqlite(e.to_string()))
+        self.tx
+            .rollback()
+            .map_err(|e| StoreError::SqliteError(e.to_string()))
     }
 }
-
 
 #[derive(Debug)]
 pub struct SqliteStore {
@@ -52,81 +63,188 @@ impl SqliteStore {
     }
 
     pub fn new_connection(&self) -> Result<PooledConnection<SqliteConnectionManager>, StoreError> {
-        Ok(self.conn_pool.get().map_err(|err| StoreError::Sqlite(err.to_string()))?)
+        Ok(self
+            .conn_pool
+            .get()
+            .map_err(|err| StoreError::SqliteError(err.to_string()))?)
     }
-
 }
 
 impl Storage for SqliteStore {
-    type Transaction<'s> = SqliteTransaction<'s>
+    type Transaction<'s>
+        = SqliteTransaction<'s>
     where
         Self: 's;
 }
 
-
-impl<'conn> ProtocolStore for SqliteTransaction<'conn> {
-
-}
+impl<'conn> ProtocolStore for SqliteTransaction<'conn> {}
 
 impl<'conn> UserStore for SqliteTransaction<'conn> {
-    fn load_user(&mut self,
-        message_from: IdentityKey,
-    ) -> std::result::Result<UserRecord, StoreError> {
+    fn load_user_by_id(&mut self, user_id: IdentityKey) -> Result<UserRecord, StoreError> {
         let mut stmt = self.tx.prepare("SELECT data FROM user WHERE userid = ?")?;
-        //let sender_exists  = stmt.query_row([message_from.uuid], |row| row.get::<usize, Vec<u8>>(0)).map_err(|_| DatabaseError::StorageError)?;
-        todo!()
+        let user = stmt.query_row([&user_id], |row| {
+            let pk_bytes: Vec<u8> = row.get(1)?;
+            let public_key_array: [u8; 32] = pk_bytes.try_into().map_err(|_vec_err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1, // Column index
+                    rusqlite::types::Type::Blob,
+                    "Public key blob was not 32 bytes long.".into(),
+                )
+            })?;
+            let public_key = PublicKey::from(public_key_array);
+            Ok(UserRecord {
+                user_id: row.get(0)?,
+                public_key,
+                username: row.get(2)?,
+                is_stale: row.get(3)?,
+            })
+        })?;
+        Ok(user)
+    }
+
+    fn load_user_by_name(&mut self, user_name: &String) -> Result<UserRecord, StoreError> {
+        let mut stmt = self
+            .tx
+            .prepare("SELECT user_id, username, public_key FROM users WHERE username = ?")?;
+        let user = stmt.query_row([&user_name], |row| {
+            let pk_bytes: Vec<u8> = row.get(2)?;
+            let public_key_array: [u8; 32] = pk_bytes.try_into().map_err(|_vec_err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1, // Column index
+                    rusqlite::types::Type::Blob,
+                    "Public key blob was not 32 bytes long.".into(),
+                )
+            })?;
+            let public_key = PublicKey::from(public_key_array);
+            Ok(UserRecord {
+                user_id: row.get(0)?,
+                username: row.get(1)?,
+                public_key,
+                is_stale: false,
+            })
+        })?;
+        Ok(user)
     }
 
     fn store_user(&mut self, record: &UserRecord) -> Result<(), StoreError> {
-        self.tx.execute(
-            "INSERT INTO Users (id, name, public_key) VALUES (?1, ?2, ?3)",
-            params![
-                record.user_id.uuid.to_string(),
-                record.username,
-                record.public_key.as_bytes(),
-            ],
-        )
-        .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
+        self.tx
+            .execute(
+                "INSERT INTO users (user_id, username, public_key) VALUES (?1, ?2, ?3)",
+                params![
+                    record.user_id.uuid.to_string(),
+                    record.username,
+                    record.public_key.as_bytes(),
+                ],
+            )
+            .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
         Ok(())
     }
 
-    fn create_user(
-        &mut self,
-        username: String,
-        public_key: [u8; 32],
-    ) -> Result<(), StoreError> {
+    fn create_user(&mut self, username: String, public_key: [u8; 32]) -> Result<(), StoreError> {
         // check username already exists and fail
 
-        // let mut stmt = conn.prepare("SELECT data FROM user WHERE userid = ?")?;
-        // let sender_exists= stmt.query_row([username], |row| row.get::<usize, Vec<u8>>(0)).map_err(|e| DatabaseError::StorageError(e.to_string()))?;
-        // if sender_exists {
-        //     return Err(StoreError::)
-        // }
+        let count: i64 = self.tx.query_row(
+            "SELECT COUNT(*) FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )?;
+        if count > 0 {
+            return Err(StoreError::UserAlreadyExists(username));
+        }
 
-        self.tx.execute(
-            "INSERT INTO Users (user_id, username, public_key) VALUES (?1, ?2, ?3)",
-            params![Uuid::now_v7().to_string(), username, public_key],
-        )
-        .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
+        self.tx
+            .execute(
+                "INSERT INTO users (user_id, username, public_key) VALUES (?1, ?2, ?3)",
+                params![Uuid::now_v7().to_string(), username, public_key],
+            )
+            .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
+
         Ok(())
     }
 }
 
 impl<'conn> SessionStore for SqliteTransaction<'conn> {
-    fn load_session(
+    fn load_sessions(
         &mut self,
         message_from: IdentityKey,
     ) -> std::result::Result<SessionRecord, StoreError> {
-
-        let mut stmt = self.tx.prepare("SELECT data FROM user WHERE userid = ?")?;
-        todo!()
+        let mut stmt = self.tx.prepare(
+            "SELECT data FROM sessions WHERE remote_user_id = ? and is_active_session = true",
+        )?;
+        todo!("Return list of all Sessions for the person its from.")
     }
 
-    fn store_session(&mut self,
-        record: &SessionRecord,
-        message_from: IdentityKey,
-    ) -> std::result::Result<(), StoreError> {
-        todo!()
+    fn load_active_session(
+        &mut self,
+        message_from: &IdentityKey,
+    ) -> std::result::Result<SessionRecord, StoreError> {
+        let mut stmt = self.tx.prepare("SELECT session_id, remote_user_id, remote_device_id, session_record, is_active_session, inactive_order FROM sessions WHERE remote_user_id = ? and is_active_session = true")?;
+        Ok(stmt.query_row([&message_from], |row| {
+            let dr_data: Vec<u8> = row.get(3)?;
+            let (double_ratchet, _len): (DoubleRatchet, usize) =
+                bincode::serde::decode_from_slice(&dr_data, standard()).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        3,
+                        rusqlite::types::Type::Blob,
+                        Box::new(e),
+                    )
+                })?;
+
+            Ok(SessionRecord {
+                session_id: row.get(0)?,
+                remote_device_id: row.get(1)?,
+                remote_user_id: row.get(2)?,
+                double_ratchet,
+                is_active_session: row.get(4)?,
+                inactive_order: row.get(5)?,
+            })
+        })?)
+    }
+
+    fn create_session(&mut self, peer_id: &IdentityKey, peer_device: &IdentityKey, double_ratchet: &DoubleRatchet) -> std::result::Result<(), StoreError> {
+        let double_ratchet_data = bincode::serde::encode_to_vec(&double_ratchet, standard())
+            .map_err(|e| {
+                StoreError::SerialisationError(format!("Failed to serialize DoubleRatchet: {}", e))
+            })?;
+
+        self.tx.execute(
+            "INSERT OR REPLACE INTO sessions
+             (session_id, remote_user_id, remote_device_id, session_record, is_active_session, inactive_order, last_updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now'))",
+            params![
+                Uuid::now_v7().to_string(),
+                peer_id,
+                peer_device,
+                double_ratchet_data,
+                true,
+                0,
+            ],
+        ).map_err(|e| StoreError::SqliteError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn store_session(&mut self, record: &SessionRecord) -> std::result::Result<(), StoreError> {
+        let double_ratchet_data = bincode::serde::encode_to_vec(&record.double_ratchet, standard())
+            .map_err(|e| {
+                StoreError::SerialisationError(format!("Failed to serialize DoubleRatchet: {}", e))
+            })?;
+
+        self.tx.execute(
+            "INSERT OR REPLACE INTO sessions
+             (session_id, remote_user_id, remote_device_id, session_record, is_active_session, inactive_order, last_updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now'))",
+            params![
+                record.session_id,
+                record.remote_user_id,
+                record.remote_device_id,
+                double_ratchet_data,
+                record.is_active_session,
+                0,
+            ],
+        ).map_err(|e| StoreError::SqliteError(e.to_string()))?;
+
+        Ok(())
     }
 }
 
@@ -164,7 +282,8 @@ impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
     ) -> std::result::Result<Option<SymmetricChainState>, StoreError> {
         let record_id = generate_chain_record_id(session_id, chain_identifier);
 
-        let result = self.tx
+        let result = self
+            .tx
             .query_row(
                 "SELECT chain_key, message_count, skipped_keys_data
              FROM SymmetricChainRecords
@@ -204,6 +323,55 @@ impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
             .optional()?;
 
         Ok(result)
+    }
+}
+
+impl<'conn> MessageStore for SqliteTransaction<'conn> {
+    fn store_message(
+        &mut self,
+        peer: &PublicKey,
+        message_type: &MessageType,
+        content: &str,
+    ) -> std::result::Result<(), StoreError> {
+        self.tx
+            .execute(
+                "INSERT INTO messages(message_id, recipient_id, message_type, content) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    Uuid::now_v7().to_string(),
+                    peer.as_bytes(),
+                    message_type,
+                    content
+                ],
+            )
+            .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
+
+        Ok(())
+    }
+
+    fn retrieve_message_for_recipient(
+        &mut self,
+        peer: &PublicKey,
+    ) -> std::result::Result<Vec<MessageRecord>, StoreError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT message_id, message_type, content
+             FROM messages
+             WHERE recipient_id = ?",
+        )?;
+
+        let rows = stmt.query(params![peer.as_bytes()])?;
+
+        let messages = rows
+            .map(|row| {
+                Ok(MessageRecord::from_db(
+                    row.get(0)?,
+                    peer.clone(),
+                    MessageType::from(row.get(1)?),
+                    row.get(2)?,
+                ))
+            })
+            .collect()?;
+
+        Ok(messages)
     }
 }
 

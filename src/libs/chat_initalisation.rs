@@ -1,13 +1,9 @@
 use crate::libs::encryption::double_ratchet::{
     DHKeyGenerator, DHKeyPair, DoubleRatchet, KeySecret,
 };
+use crate::libs::models::IdentityKey;
 use crate::libs::storage::records::{SessionRecord, UserRecord};
-use hmac::digest::Key;
 use std::array::TryFromSliceError;
-use std::fmt::format;
-use std::io::Read;
-use rusqlite::ToSql;
-use rusqlite::types::ToSqlOutput;
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
 
@@ -25,25 +21,6 @@ pub enum ChatInitError {
 impl From<TryFromSliceError> for ChatInitError {
     fn from(err: TryFromSliceError) -> Self {
         ChatInitError::DeserialiseError(err)
-    }
-}
-
-#[derive(Clone)]
-pub struct IdentityKey {
-    pub uuid: Uuid,
-}
-
-impl From<[u8; 16]> for IdentityKey {
-    fn from(bytes: [u8; 16]) -> IdentityKey {
-        Self {
-            uuid: Uuid::from_bytes(bytes)
-        }
-    }
-}
-
-impl ToSql for IdentityKey {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.uuid.to_string()))
     }
 }
 
@@ -103,7 +80,7 @@ fn alice_init_from_qr_data<DHKeyGen: DHKeyGenerator>(
         false,
     );
     let bob_session_record =
-        SessionRecord::new(bob_pub_user_id, alice_double_ratchet, device_id, true);
+        SessionRecord::new(&bob_pub_user_id, alice_double_ratchet, device_id, true);
     Ok(bob_session_record)
 }
 
@@ -129,6 +106,6 @@ fn bob_init_from_qr_data<DHKeyGen: DHKeyGenerator>(
         false,
     );
     let alice_session_record =
-        SessionRecord::new(alice_pub_user_id, bob_double_ratchet, device_id, true);
+        SessionRecord::new(&alice_pub_user_id, bob_double_ratchet, device_id, true);
     Ok(alice_session_record)
 }

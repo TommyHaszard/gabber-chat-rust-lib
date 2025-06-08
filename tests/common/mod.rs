@@ -1,16 +1,13 @@
-use std::fs;
-use std::sync::Once;
-
-// Use a static directory for all tests with cleanup at the end
-
 use gabber_chat_lib::init_database;
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
+use gabber_chat_lib::libs::storage::database::database::DATABASE;
+use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use rusqlite::Connection;
+use std::fs;
 use std::path::Path;
-use gabber_chat_lib::libs::storage::database::database::DATABASE;
-use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
+use std::sync::Once;
 
 pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
     init.call_once(|| {
@@ -21,21 +18,32 @@ pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
     });
 
     // Create a unique database file name for each test
-    let db_path= format!("{}/{}_{}.db", dir, prefix, std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_nanos());
+    let db_path = format!(
+        "{}/{}_{}.db",
+        dir,
+        prefix,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_nanos()
+    );
 
     init_database(db_path.clone());
-    assert!(Path::new(&db_path).exists(), "Database file should exist after initialization");
+    assert!(
+        Path::new(&db_path).exists(),
+        "Database file should exist after initialization"
+    );
 }
 
 pub fn cleanup_test_db() {
-    let database_pool= DATABASE.get().unwrap();
+    let database_pool = DATABASE.get().unwrap();
     let mut connection = database_pool.new_connection().unwrap();
 
-    let mut sqlite_transaction = SqliteTransaction::new(&mut connection).expect("Failed to create transaction.");
-    sqlite_transaction.inner().execute_batch(
+    let mut sqlite_transaction =
+        SqliteTransaction::new(&mut connection).expect("Failed to create transaction.");
+    sqlite_transaction
+        .inner()
+        .execute_batch(
             r#"
             DELETE FROM messages;
             DELETE FROM sessions;
@@ -44,10 +52,9 @@ pub fn cleanup_test_db() {
             DELETE FROM users;
             DELETE FROM app_settings;
             "#,
-
-        ).expect("Failed to delete from users.");
+        )
+        .expect("Failed to delete from users.");
 }
-
 
 pub fn ratchet_init<DHKeyGen>(mut real_gen: DHKeyGen) -> (DoubleRatchet, DoubleRatchet)
 where
@@ -59,8 +66,7 @@ where
     let bob_key_pair = real_gen.generate_dh();
     let alice_key_pair = real_gen.generate_dh();
 
-    let alice =
-        DoubleRatchet::initialise_alice(alice_key_pair, shared_key, bob_key_pair.public);
+    let alice = DoubleRatchet::initialise_alice(alice_key_pair, shared_key, bob_key_pair.public);
     let bob = DoubleRatchet::initialise_bob(shared_key, bob_key_pair, None);
 
     (alice, bob)

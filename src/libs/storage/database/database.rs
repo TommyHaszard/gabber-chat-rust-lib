@@ -1,10 +1,10 @@
-use std::cell::OnceCell;
 use rusqlite::{Connection, Result};
+use std::cell::OnceCell;
 use std::sync::{Mutex, Once, OnceLock};
 
-use crate::DatabaseError;
 use crate::libs::storage::database::storage_sqllite::{SqliteStore, SqliteTransaction};
-use crate::libs::storage::storage_traits::Storage;
+use crate::libs::storage::storage_traits::{Storage, StoreError, Transactional};
+use crate::DatabaseError;
 
 static INIT: Once = Once::new();
 pub static DATABASE: OnceLock<SqliteStore> = OnceLock::new();
@@ -39,12 +39,12 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
         sqlite_transaction.inner().execute(
             "CREATE TABLE IF NOT EXISTS messages (
                 message_id TEXT PRIMARY KEY,
-                recipient_id TEXT NOT NULL,
+                recipient_id BLOB NOT NULL,
                 message_type TEXT NOT NULL,
                 content BLOB NOT NULL,
                 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
 
-                CHECK (message_type IN ('normal_message', 'initialisation_message'))
+                CHECK (message_type IN ('sent', 'received', 'passing'))
             );",
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
@@ -72,6 +72,7 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
                     session_record BLOB,
                     is_active_session BOOLEAN NOT NULL DEFAULT false,
                     inactive_order INTEGER,
+                    last_updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
 
                     --FOREIGN KEY (remote_device_id) REFERENCES devices(user_id, device_id) ON DELETE CASCADE,
                     FOREIGN KEY (remote_user_id) REFERENCES users(user_id) ON DELETE CASCADE
@@ -116,23 +117,6 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
         sqlite_transaction.inner().execute(
-            "CREATE TRIGGER IF NOT EXISTS update_conversation_timestamp
-                AFTER INSERT ON Messages
-                BEGIN
-                    UPDATE Conversations
-                    SET updated_at = strftime('%s', 'now'),
-                        last_message_preview = NEW.content,
-                        unread_count = CASE
-                                            WHEN NEW.is_outgoing = 0 THEN unread_count + 1
-                                            ELSE unread_count
-                                        END
-                    WHERE conversation_id = NEW.conversation_id;
-                END;",
-            [],
-        ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
-
-
-        sqlite_transaction.inner().execute(
             "CREATE TRIGGER IF NOT EXISTS cleanup_old_messages
                 AFTER UPDATE ON app_settings
                 WHEN NEW.key = 'message_retention_days'
@@ -144,19 +128,26 @@ pub fn initialize_database(path: String) -> Result<(), DatabaseError> {
             [],
         ).map_err(|e| DatabaseError::InitializationError(e.to_string())).unwrap();
 
+        sqlite_transaction
+            .commit()
+            .map_err(|err| DatabaseError::InitializationError("Could not commit inital db.".to_string())).expect("TODO: panic message");
         initialized = true;
     });
 
     if initialized {
         Ok(())
     } else {
-        let database_pool= DATABASE.get().unwrap();
+        let database_pool = DATABASE.get().unwrap();
         let mut connection = database_pool.new_connection().unwrap();
 
         let sqlite_transaction = SqliteTransaction::new(&mut connection)
-            .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err))).unwrap();
+            .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err)))
+            .unwrap();
         // Just verify the connection works
-        sqlite_transaction.inner().execute("SELECT 1", []).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+        sqlite_transaction
+            .inner()
+            .execute("SELECT 1", [])
+            .map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
         Ok(())
     }
 }

@@ -1,14 +1,11 @@
 mod common;
 
-use crate::libs::encryption::double_ratchet::*;
 use crate::common::*;
-use std::path::Path;
+use crate::libs::encryption::double_ratchet::*;
 use gabber_chat_lib::*;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
-
-
-
+use std::path::Path;
 
 #[test]
 fn test_encryption_decryption() {
@@ -27,11 +24,11 @@ fn test_encryption_decryption() {
 #[test]
 fn test_alice_message_one() {
     let associated_data = b"TEST_ASSOCIATED_DATA";
-    let (mut alice, mut bob) = init();
-
-    let message1 = b"Hey Alice, how have you been?";
 
     let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
+
+    let message1 = b"Hey Alice, how have you been?";
 
     assert!(matches!(
         bob.ratchet_encrypt(message1, associated_data, &mut real_gen),
@@ -42,11 +39,11 @@ fn test_alice_message_one() {
 #[test]
 fn test_alice_message_fail() {
     let associated_data = b"TEST_ASSOCIATED_DATA";
-    let (mut alice, mut bob) = init();
+    let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
 
     let message1 = b"Hi Bob, this is Alice";
 
-    let mut real_gen = RealKeyGenerator::new();
     let (header, cipher) = alice
         .ratchet_encrypt(message1, associated_data, &mut real_gen)
         .unwrap();
@@ -67,15 +64,17 @@ fn test_alice_message_fail() {
 fn test_bob_message_returned() {
     let alice_ad = b"ALICE_ASSOCIATED_DATA";
     let bob_ad = b"BOB_ASSOCIATED_DATA";
-    let (mut alice, mut bob) = init();
-
     let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
+
     let message1 = b"Hi Bob, this is Alice";
     let (header, cipher) = alice
         .ratchet_encrypt(message1, alice_ad, &mut real_gen)
         .unwrap();
 
-    let plain_text = bob.ratchet_decrypt(header, &cipher, alice_ad, &mut real_gen).unwrap();
+    let plain_text = bob
+        .ratchet_decrypt(header, &cipher, alice_ad, &mut real_gen)
+        .unwrap();
 
     println!(
         "Decrypted: {:?}, Original: {:?}",
@@ -88,7 +87,9 @@ fn test_bob_message_returned() {
         .ratchet_encrypt(message2, bob_ad, &mut real_gen)
         .unwrap();
 
-    let plain_text = alice.ratchet_decrypt(header, &cipher, bob_ad, &mut real_gen).unwrap();
+    let plain_text = alice
+        .ratchet_decrypt(header, &cipher, bob_ad, &mut real_gen)
+        .unwrap();
     println!(
         "Decrypted: {:?}, Original: {:?}",
         String::from_utf8_lossy(&plain_text.clone()),
@@ -107,11 +108,10 @@ fn test_alice_three_in_order() {
         b"Message C (will arrive before B)",
     ];
 
-    let (mut alice, mut bob) = init();
+    let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
 
     let mut headers_and_ciphertexts = Vec::new();
-
-    let mut real_gen = RealKeyGenerator::new();
 
     for msg in messages {
         let (header, ciphertext) = alice.ratchet_encrypt(msg, alice_ad, &mut real_gen).unwrap();
@@ -133,7 +133,7 @@ fn test_alice_three_in_order() {
     // Message C arrives before B
     let (header_b, ciphertext_b) = &headers_and_ciphertexts[1];
     let plaintext_b = bob
-        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (2nd): {}",
@@ -144,7 +144,7 @@ fn test_alice_three_in_order() {
     // Finally, message B arrives
     let (header_c, ciphertext_c) = &headers_and_ciphertexts[2];
     let plaintext_c = bob
-        .ratchet_decrypt(header_c.clone(), ciphertext_c, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_c.clone(), ciphertext_c, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (3rd): {}",
@@ -163,11 +163,11 @@ fn test_alice_out_of_order() {
         b"Message C (will arrive before B)",
     ];
 
-    let (mut alice, mut bob) = init();
+    let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
 
     let mut headers_and_ciphertexts = Vec::new();
 
-    let mut real_gen = RealKeyGenerator::new();
     for msg in messages {
         let (header, ciphertext) = alice.ratchet_encrypt(msg, alice_ad, &mut real_gen).unwrap();
         headers_and_ciphertexts.push((header, ciphertext));
@@ -200,7 +200,7 @@ fn test_alice_out_of_order() {
     // Finally, message B arrives
     let (header_b, ciphertext_b) = &headers_and_ciphertexts[1];
     let plaintext_b = bob
-        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (3rd): {}",
@@ -219,11 +219,11 @@ fn test_alice_and_bob_out_of_order() {
         b"Message C (will arrive before B)",
     ];
 
-    let (mut alice, mut bob) = init();
+    let mut real_gen = RealKeyGenerator::new();
+    let (mut alice, mut bob) = ratchet_init(real_gen);
 
     let mut headers_and_ciphertexts = Vec::new();
 
-    let mut real_gen = RealKeyGenerator::new();
     for msg in messages {
         let (header, ciphertext) = alice.ratchet_encrypt(msg, alice_ad, &mut real_gen).unwrap();
         headers_and_ciphertexts.push((header, ciphertext));
@@ -233,7 +233,7 @@ fn test_alice_and_bob_out_of_order() {
     // Bob receives messages in different order (A, C, B)
     let (header_a, ciphertext_a) = &headers_and_ciphertexts[0];
     let plaintext_a = bob
-        .ratchet_decrypt(header_a.clone(), ciphertext_a, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_a.clone(), ciphertext_a, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (1st): {}",
@@ -244,7 +244,7 @@ fn test_alice_and_bob_out_of_order() {
     // Message C arrives before B
     let (header_c, ciphertext_c) = &headers_and_ciphertexts[2];
     let plaintext_c = bob
-        .ratchet_decrypt(header_c.clone(), ciphertext_c, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_c.clone(), ciphertext_c, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (2nd): {}",
@@ -257,7 +257,7 @@ fn test_alice_and_bob_out_of_order() {
         .ratchet_encrypt(message_bob_to_alice, bob_ad, &mut real_gen)
         .unwrap();
     let plaintext_bob = alice
-        .ratchet_decrypt(header_bob.clone(), &cipher_bob, bob_ad,  &mut real_gen)
+        .ratchet_decrypt(header_bob.clone(), &cipher_bob, bob_ad, &mut real_gen)
         .unwrap();
     println!(
         "Alice received (1st): {}",
@@ -269,7 +269,7 @@ fn test_alice_and_bob_out_of_order() {
     // Finally, message B arrives
     let (header_b, ciphertext_b) = &headers_and_ciphertexts[1];
     let plaintext_b = bob
-        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad,  &mut real_gen)
+        .ratchet_decrypt(header_b.clone(), ciphertext_b, alice_ad, &mut real_gen)
         .unwrap();
     println!(
         "Bob received (3rd): {}",
@@ -277,4 +277,3 @@ fn test_alice_and_bob_out_of_order() {
     );
     assert_eq!(plaintext_b, messages[1]);
 }
-

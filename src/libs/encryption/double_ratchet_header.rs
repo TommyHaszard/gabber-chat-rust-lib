@@ -1,3 +1,7 @@
+use crate::libs::encryption::double_ratchet::{
+    concat_header_and_ad, decrypt, derive_hkdf_key_and_nonce, encrypt, kdf_ck, kdf_rk, DHKeyPair,
+    DoubleRatchetError, MessageHeader,
+};
 use chacha20poly1305::aead::{Aead, Buffer, Payload};
 use chacha20poly1305::{AeadCore, ChaCha20Poly1305, Nonce};
 use hkdf::Hkdf;
@@ -10,7 +14,6 @@ use std::fmt;
 use std::fmt::{format, Debug, Formatter};
 use std::ptr::write;
 use x25519_dalek::{PublicKey, SharedSecret, StaticSecret};
-use crate::libs::encryption::double_ratchet::{concat_header_and_ad, decrypt, derive_hkdf_key_and_nonce, encrypt, kdf_ck, kdf_rk, DHKeyPair, DoubleRatchetError, MessageHeader};
 // Implementation of Signals Double Ratchet Algorithm with x25519_dalek
 // https://signal.org/docs/specifications/doubleratchet
 
@@ -79,13 +82,17 @@ pub struct DoubleRatchetHE {
 
     next_header_key_recv: Option<KeySecret>,
 
-    next_header_key_send: Option<KeySecret>
-
+    next_header_key_send: Option<KeySecret>,
 }
 
 impl DoubleRatchetHE {
     // Takes an initial shared secrete between two parties, the other parties public key and
-    pub fn initialise_alice_he(shared_root_key: KeySecret, bobby_public_key: PublicKey, shared_hka: KeySecret, shared_nhkb: KeySecret) -> Self {
+    pub fn initialise_alice_he(
+        shared_root_key: KeySecret,
+        bobby_public_key: PublicKey,
+        shared_hka: KeySecret,
+        shared_nhkb: KeySecret,
+    ) -> Self {
         let dh_pair = DHKeyPair::generate_dh();
         let dh = dh_pair.private.diffie_hellman(&bobby_public_key);
         let (rk, cks, nhk) = kdf_rk_he(shared_root_key, &dh).unwrap();
@@ -103,7 +110,7 @@ impl DoubleRatchetHE {
             header_key_send: Some(shared_hka),
             header_key_recv: None,
             next_header_key_recv: Some(shared_nhkb),
-            next_header_key_send: None
+            next_header_key_send: None,
         }
     }
 
@@ -127,7 +134,7 @@ impl DoubleRatchetHE {
             header_key_send: None,
             header_key_recv: None,
             next_header_key_send: Some(shared_nhkb),
-            next_header_key_recv: Some(shared_hka)
+            next_header_key_recv: Some(shared_hka),
         }
     }
 
@@ -174,7 +181,8 @@ impl DoubleRatchetHE {
                         self.recv_count += 1;
 
                         let header_serialised = header.serialise_header();
-                        let concat_ad = concat_header_and_ad(associated_data, header_serialised.as_slice());
+                        let concat_ad =
+                            concat_header_and_ad(associated_data, header_serialised.as_slice());
 
                         decrypt(&message_key, cipher_text, &concat_ad.as_slice())
                     }
@@ -241,20 +249,21 @@ impl DoubleRatchetHE {
         Ok(())
     }
 
-
     fn try_decrypt_he(
         &self,
         message_enc: &CipherText,
     ) -> Result<(MessageHeader, bool), DoubleRatchetError> {
         let header = decrypt_he(&self.header_key_recv.unwrap(), message_enc)?;
-        if header.is_some(){
+        if header.is_some() {
             return Ok((header.unwrap(), false));
         }
         let header = decrypt_he(&self.next_header_key_recv.unwrap(), message_enc)?;
-        if header.is_some(){
+        if header.is_some() {
             Ok((header.unwrap(), true))
         } else {
-            Err(DoubleRatchetError::DecryptHeaderFailure("Failed to decrypt header".to_string()))
+            Err(DoubleRatchetError::DecryptHeaderFailure(
+                "Failed to decrypt header".to_string(),
+            ))
         }
     }
 }
@@ -322,7 +331,8 @@ fn encrypt_he(
     header_key_send: &KeySecret,
     header: MessageHeader,
 ) -> Result<CipherText, DoubleRatchetError> {
-    let (key_bytes, nonce_bytes) = derive_hkdf_key_and_nonce(header_key_send, HKDF_INFO_ENCRYPTION_HEADER_KEY)?;
+    let (key_bytes, nonce_bytes) =
+        derive_hkdf_key_and_nonce(header_key_send, HKDF_INFO_ENCRYPTION_HEADER_KEY)?;
 
     let key = chacha20poly1305::Key::from_slice(&key_bytes);
     let cipher = ChaCha20Poly1305::new(key);
@@ -332,10 +342,7 @@ fn encrypt_he(
     let header_seralised = header.serialise_header();
 
     let ciphertext = cipher
-        .encrypt(
-            nonce,
-            header_seralised.as_slice()
-        )
+        .encrypt(nonce, header_seralised.as_slice())
         .map_err(|e| DoubleRatchetError::AeadError(e.to_string()))?;
 
     Ok(ciphertext)
@@ -345,35 +352,30 @@ fn decrypt_he(
     header_key_rec: &KeySecret,
     header_enc: &CipherText,
 ) -> Result<Option<MessageHeader>, DoubleRatchetError> {
-    let (key_bytes, nonce_bytes) = derive_hkdf_key_and_nonce(header_key_rec, HKDF_INFO_ENCRYPTION_HEADER_KEY)?;
+    let (key_bytes, nonce_bytes) =
+        derive_hkdf_key_and_nonce(header_key_rec, HKDF_INFO_ENCRYPTION_HEADER_KEY)?;
 
     let key = chacha20poly1305::Key::from_slice(&key_bytes);
     let cipher = ChaCha20Poly1305::new(key);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let cipher_decrypt_result = cipher
-        .decrypt(
-            nonce,
-            header_enc.as_slice(),
-        );
+    let cipher_decrypt_result = cipher.decrypt(nonce, header_enc.as_slice());
 
     // Cipher decrypt can fail as the key could be wrong, so it can return None.
     // The deseralise could fail and return deserialise error so we got to return but also
     // return the Optional if it succeeds.
 
     match cipher_decrypt_result {
-        Ok(plaintext) => {
-           Ok(Some(deserialize_header(plaintext.as_slice())?))
-        }
-        Err(_) => {
-            Ok(None)
-        }
+        Ok(plaintext) => Ok(Some(deserialize_header(plaintext.as_slice())?)),
+        Err(_) => Ok(None),
     }
 }
 
 fn deserialize_header(data: &[u8]) -> Result<MessageHeader, DoubleRatchetError> {
     if data.len() < 32 + 4 + 4 {
-        return Err(DoubleRatchetError::DecryptHeaderFailure("Failed to deserialise Header".to_string()))
+        return Err(DoubleRatchetError::DecryptHeaderFailure(
+            "Failed to deserialise Header".to_string(),
+        ));
     }
 
     let dh_bytes = &data[0..32];
@@ -394,7 +396,7 @@ fn deserialize_header(data: &[u8]) -> Result<MessageHeader, DoubleRatchetError> 
     Ok(MessageHeader {
         dh_public_key: PublicKey::from(dh),
         prev_chain_number: pn,
-        message_number: n
+        message_number: n,
     })
 }
 
