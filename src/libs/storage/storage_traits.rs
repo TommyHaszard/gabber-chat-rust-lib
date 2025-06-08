@@ -2,9 +2,9 @@ use crate::libs::encryption::double_ratchet::{DoubleRatchet, SymmetricChainState
 use crate::libs::models::{IdentityKey, MessageType};
 use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::DatabaseError;
-use std::{fmt, format};
 use bincode::config::standard;
 use rusqlite::params;
+use std::{fmt, format};
 use x25519_dalek::PublicKey;
 
 pub trait Storage {
@@ -32,7 +32,12 @@ pub trait SessionStore {
         &mut self,
         message_from: &IdentityKey,
     ) -> Result<SessionRecord, StoreError>;
-    fn create_session(&mut self, peer_id: &IdentityKey, peer_device: &IdentityKey, double_ratchet: &DoubleRatchet) -> std::result::Result<(), StoreError>;
+    fn create_session(
+        &mut self,
+        peer_id: &IdentityKey,
+        peer_device: &IdentityKey,
+        double_ratchet: &DoubleRatchet,
+    ) -> std::result::Result<(), StoreError>;
     fn store_session(&mut self, record: &SessionRecord) -> Result<(), StoreError>;
 }
 

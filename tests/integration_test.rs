@@ -5,7 +5,9 @@ use gabber_chat_lib::libs::models::{IdentityKey, MessageType};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
 use gabber_chat_lib::libs::storage::records::SessionRecord;
-use gabber_chat_lib::libs::storage::storage_traits::{MessageStore, SessionStore, Transactional, UserStore};
+use gabber_chat_lib::libs::storage::storage_traits::{
+    MessageStore, SessionStore, Transactional, UserStore,
+};
 use std::sync::Once;
 
 mod common;
@@ -131,7 +133,8 @@ fn messaging_test() {
     let mut tx_4 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    let messages = tx_4.retrieve_message_for_recipient(&alice.dhs.public)
+    let messages = tx_4
+        .retrieve_message_for_recipient(&alice.dhs.public)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -139,7 +142,11 @@ fn messaging_test() {
     let message_retrieved = messages.get(0).unwrap();
 
     let (header, cipher) = alice
-        .ratchet_encrypt(message_retrieved.content.as_bytes(), alice_ad, &mut real_gen)
+        .ratchet_encrypt(
+            message_retrieved.content.as_bytes(),
+            alice_ad,
+            &mut real_gen,
+        )
         .unwrap();
 
     let plain_text = bob_session_retrieved
@@ -153,8 +160,7 @@ fn messaging_test() {
         &message1
     );
 
-    assert_eq!(&plain_text,
-               &message1.as_bytes());
+    assert_eq!(&plain_text, &message1.as_bytes());
 
     tx_4.store_session(&bob_session_retrieved);
     tx_4.commit();
@@ -165,7 +171,10 @@ fn messaging_test() {
     let mut bob_session_retrieved2 = tx_5
         .load_active_session(&bob_user.user_id)
         .expect("Failed to load Bob Session");
-    assert_eq!(bob_session_retrieved2.session_id, bob_session_retrieved.session_id);
+    assert_eq!(
+        bob_session_retrieved2.session_id,
+        bob_session_retrieved.session_id
+    );
 
     let message_2 = "Hi Bob, this is Alice_2";
 
@@ -176,7 +185,8 @@ fn messaging_test() {
     let mut tx_6 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    let messages_retrieved_2 = tx_6.retrieve_message_for_recipient(&alice.dhs.public)
+    let messages_retrieved_2 = tx_6
+        .retrieve_message_for_recipient(&alice.dhs.public)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);
@@ -184,7 +194,11 @@ fn messaging_test() {
     let message_retrieved = messages_retrieved_2.get(1).unwrap();
 
     let (header, cipher) = alice
-        .ratchet_encrypt(message_retrieved.content.as_bytes(), alice_ad, &mut real_gen)
+        .ratchet_encrypt(
+            message_retrieved.content.as_bytes(),
+            alice_ad,
+            &mut real_gen,
+        )
         .unwrap();
 
     let plain_text_2 = bob_session_retrieved
@@ -198,11 +212,9 @@ fn messaging_test() {
         &message_2
     );
 
-    assert_eq!(&plain_text,
-               &message1.as_bytes());
+    assert_eq!(&plain_text, &message1.as_bytes());
     cleanup_test_db()
 }
-
 
 #[test]
 fn messaging_test_unordered_message() {
@@ -252,7 +264,8 @@ fn messaging_test_unordered_message() {
     let mut tx_4 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    let messages = tx_4.retrieve_message_for_recipient(&alice.dhs.public)
+    let messages = tx_4
+        .retrieve_message_for_recipient(&alice.dhs.public)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -260,7 +273,11 @@ fn messaging_test_unordered_message() {
     let message_retrieved = messages.get(0).unwrap();
 
     let (header, cipher) = alice
-        .ratchet_encrypt(message_retrieved.content.as_bytes(), alice_ad, &mut real_gen)
+        .ratchet_encrypt(
+            message_retrieved.content.as_bytes(),
+            alice_ad,
+            &mut real_gen,
+        )
         .unwrap();
 
     let plain_text = bob_session_retrieved
@@ -274,8 +291,7 @@ fn messaging_test_unordered_message() {
         &message1
     );
 
-    assert_eq!(&plain_text,
-               &message1.as_bytes());
+    assert_eq!(&plain_text, &message1.as_bytes());
 
     tx_4.store_session(&bob_session_retrieved);
     tx_4.commit();
@@ -286,7 +302,10 @@ fn messaging_test_unordered_message() {
     let mut bob_session_retrieved2 = tx_5
         .load_active_session(&bob_user.user_id)
         .expect("Failed to load Bob Session");
-    assert_eq!(bob_session_retrieved2.session_id, bob_session_retrieved.session_id);
+    assert_eq!(
+        bob_session_retrieved2.session_id,
+        bob_session_retrieved.session_id
+    );
 
     let message_2 = "Hi Bob, this is Alice_2";
 
@@ -297,7 +316,8 @@ fn messaging_test_unordered_message() {
     let mut tx_6 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    let messages_retrieved_2 = tx_6.retrieve_message_for_recipient(&alice.dhs.public)
+    let messages_retrieved_2 = tx_6
+        .retrieve_message_for_recipient(&alice.dhs.public)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);
@@ -305,7 +325,11 @@ fn messaging_test_unordered_message() {
     let message_retrieved = messages_retrieved_2.get(1).unwrap();
 
     let (header, cipher) = alice
-        .ratchet_encrypt(message_retrieved.content.as_bytes(), alice_ad, &mut real_gen)
+        .ratchet_encrypt(
+            message_retrieved.content.as_bytes(),
+            alice_ad,
+            &mut real_gen,
+        )
         .unwrap();
 
     let plain_text_2 = bob_session_retrieved
@@ -319,7 +343,6 @@ fn messaging_test_unordered_message() {
         &message_2
     );
 
-    assert_eq!(&plain_text,
-               &message1.as_bytes());
+    assert_eq!(&plain_text, &message1.as_bytes());
     //cleanup_test_db()
 }

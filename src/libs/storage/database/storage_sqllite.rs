@@ -201,7 +201,12 @@ impl<'conn> SessionStore for SqliteTransaction<'conn> {
         })?)
     }
 
-    fn create_session(&mut self, peer_id: &IdentityKey, peer_device: &IdentityKey, double_ratchet: &DoubleRatchet) -> std::result::Result<(), StoreError> {
+    fn create_session(
+        &mut self,
+        peer_id: &IdentityKey,
+        peer_device: &IdentityKey,
+        double_ratchet: &DoubleRatchet,
+    ) -> std::result::Result<(), StoreError> {
         let double_ratchet_data = bincode::serde::encode_to_vec(&double_ratchet, standard())
             .map_err(|e| {
                 StoreError::SerialisationError(format!("Failed to serialize DoubleRatchet: {}", e))
