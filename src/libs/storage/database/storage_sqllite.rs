@@ -25,9 +25,7 @@ impl<'conn> SqliteTransaction<'conn> {
     pub fn new(
         conn: &'conn mut PooledConnection<SqliteConnectionManager>,
     ) -> Result<Self, StoreError> {
-        let trans = conn
-            .transaction()
-            .map_err(|e| StoreError::SqliteError(e.to_string()))?;
+        let trans = conn.transaction()?;
         Ok(Self { tx: trans })
     }
 
@@ -38,15 +36,11 @@ impl<'conn> SqliteTransaction<'conn> {
 
 impl<'conn> Transactional for SqliteTransaction<'conn> {
     fn commit(self) -> Result<(), StoreError> {
-        self.tx
-            .commit()
-            .map_err(|e| StoreError::SqliteError(e.to_string()))
+        Ok(self.tx.commit()?)
     }
 
     fn rollback(self) -> Result<(), StoreError> {
-        self.tx
-            .rollback()
-            .map_err(|e| StoreError::SqliteError(e.to_string()))
+        self.tx.rollback().map_err(StoreError::SqliteError)
     }
 }
 
@@ -63,10 +57,7 @@ impl SqliteStore {
     }
 
     pub fn new_connection(&self) -> Result<PooledConnection<SqliteConnectionManager>, StoreError> {
-        Ok(self
-            .conn_pool
-            .get()
-            .map_err(|err| StoreError::SqliteError(err.to_string()))?)
+        Ok(self.conn_pool.get()?)
     }
 }
 
@@ -166,7 +157,7 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
 impl<'conn> SessionStore for SqliteTransaction<'conn> {
     fn load_sessions(
         &mut self,
-        message_from: IdentityKey,
+        message_from: &IdentityKey,
     ) -> std::result::Result<SessionRecord, StoreError> {
         let mut stmt = self.tx.prepare(
             "SELECT data FROM sessions WHERE remote_user_id = ? and is_active_session = true",
@@ -207,10 +198,7 @@ impl<'conn> SessionStore for SqliteTransaction<'conn> {
         peer_device: &IdentityKey,
         double_ratchet: &DoubleRatchet,
     ) -> std::result::Result<(), StoreError> {
-        let double_ratchet_data = bincode::serde::encode_to_vec(&double_ratchet, standard())
-            .map_err(|e| {
-                StoreError::SerialisationError(format!("Failed to serialize DoubleRatchet: {}", e))
-            })?;
+        let double_ratchet_data = bincode::serde::encode_to_vec(&double_ratchet, standard())?;
 
         self.tx.execute(
             "INSERT OR REPLACE INTO sessions
@@ -224,16 +212,14 @@ impl<'conn> SessionStore for SqliteTransaction<'conn> {
                 true,
                 0,
             ],
-        ).map_err(|e| StoreError::SqliteError(e.to_string()))?;
+        )?;
 
         Ok(())
     }
 
     fn store_session(&mut self, record: &SessionRecord) -> std::result::Result<(), StoreError> {
-        let double_ratchet_data = bincode::serde::encode_to_vec(&record.double_ratchet, standard())
-            .map_err(|e| {
-                StoreError::SerialisationError(format!("Failed to serialize DoubleRatchet: {}", e))
-            })?;
+        let double_ratchet_data =
+            bincode::serde::encode_to_vec(&record.double_ratchet, standard())?;
 
         self.tx.execute(
             "INSERT OR REPLACE INTO sessions
@@ -247,7 +233,7 @@ impl<'conn> SessionStore for SqliteTransaction<'conn> {
                 record.is_active_session,
                 0,
             ],
-        ).map_err(|e| StoreError::SqliteError(e.to_string()))?;
+        )?;
 
         Ok(())
     }
@@ -256,16 +242,15 @@ impl<'conn> SessionStore for SqliteTransaction<'conn> {
 impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
     fn store_symmetric_chain_state(
         &mut self,
-        session_id: &str,
+        session_id: &IdentityKey,
         chain_identifier: &str,
         state: &SymmetricChainState,
     ) -> Result<(), StoreError> {
         let record_id = generate_chain_record_id(session_id, chain_identifier);
-        let skipped_keys_data = bincode::encode_to_vec(&state.skipped_keys, standard())
-            .map_err(|e| StoreError::SerialisationError(e.to_string()))?;
+        let skipped_keys_data = bincode::encode_to_vec(&state.skipped_keys, standard())?;
 
         self.tx.execute(
-            "INSERT OR REPLACE INTO SymmetricChainRecords
+            "INSERT OR REPLACE INTO symmetric_chain_records
          (record_id, session_id, chain_identifier, chain_key, message_count, skipped_keys_data, last_updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now'))",
             params![
@@ -282,7 +267,7 @@ impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
 
     fn load_symmetric_chain_state(
         &mut self,
-        session_id: &str,
+        session_id: &IdentityKey,
         chain_identifier: &str,
     ) -> std::result::Result<Option<SymmetricChainState>, StoreError> {
         let record_id = generate_chain_record_id(session_id, chain_identifier);
@@ -291,7 +276,7 @@ impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
             .tx
             .query_row(
                 "SELECT chain_key, message_count, skipped_keys_data
-             FROM SymmetricChainRecords
+             FROM symmetric_chain_records
              WHERE record_id = ?1",
                 params![record_id],
                 |row| {
@@ -380,6 +365,6 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
     }
 }
 
-pub fn generate_chain_record_id(session_id: &str, chain_identifier: &str) -> String {
-    format!("{}_{}", session_id, chain_identifier)
+pub fn generate_chain_record_id(session_id: &IdentityKey, chain_identifier: &str) -> String {
+    format!("{}_{}", session_id.uuid, chain_identifier)
 }

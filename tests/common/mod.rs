@@ -2,6 +2,7 @@ use gabber_chat_lib::init_database;
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
+use gabber_chat_lib::libs::storage::storage_traits::Transactional;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use rusqlite::Connection;
@@ -35,12 +36,7 @@ pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
     );
 }
 
-pub fn cleanup_test_db() {
-    let database_pool = DATABASE.get().unwrap();
-    let mut connection = database_pool.new_connection().unwrap();
-
-    let mut sqlite_transaction =
-        SqliteTransaction::new(&mut connection).expect("Failed to create transaction.");
+pub fn cleanup_test_db(sqlite_transaction: SqliteTransaction) {
     sqlite_transaction
         .inner()
         .execute_batch(
@@ -54,6 +50,8 @@ pub fn cleanup_test_db() {
             "#,
         )
         .expect("Failed to delete from users.");
+
+    sqlite_transaction.commit().unwrap();
 }
 
 pub fn ratchet_init<DHKeyGen>(mut real_gen: DHKeyGen) -> (DoubleRatchet, DoubleRatchet)

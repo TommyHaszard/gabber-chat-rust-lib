@@ -3,8 +3,10 @@ use crate::libs::models::{IdentityKey, MessageType};
 use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::DatabaseError;
 use bincode::config::standard;
+use bincode::error::EncodeError;
 use rusqlite::params;
 use std::{fmt, format};
+use thiserror::Error;
 use x25519_dalek::PublicKey;
 
 pub trait Storage {
@@ -26,7 +28,7 @@ pub trait UserStore {
 }
 
 pub trait SessionStore {
-    fn load_sessions(&mut self, message_from: IdentityKey) -> Result<SessionRecord, StoreError>;
+    fn load_sessions(&mut self, message_from: &IdentityKey) -> Result<SessionRecord, StoreError>;
 
     fn load_active_session(
         &mut self,
@@ -44,14 +46,14 @@ pub trait SessionStore {
 pub trait SymmetricChainStore {
     fn store_symmetric_chain_state(
         &mut self,
-        session_id: &str,
+        session_id: &IdentityKey,
         chain_identifier: &str,
         state: &SymmetricChainState,
     ) -> Result<(), StoreError>;
 
     fn load_symmetric_chain_state(
         &mut self,
-        session_id: &str,
+        session_id: &IdentityKey,
         chain_identifier: &str,
     ) -> Result<Option<SymmetricChainState>, StoreError>;
 }
@@ -72,34 +74,41 @@ pub trait MessageStore {
 
 pub trait ProtocolStore: SessionStore + SymmetricChainStore + UserStore + MessageStore {}
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum StoreError {
-    DatabaseError(DatabaseError),
-    SqliteError(String),
-    SerialisationError(String),
+    #[error("Database Error: {0}")]
+    DatabaseError(#[from] DatabaseError),
+    #[error("Sqlite Error: {0}")]
+    SqliteError(#[from] rusqlite::Error),
+    #[error("ConnectionPool Error: {0}")]
+    ConnectionPoolError(#[from] r2d2::Error),
+    #[error("Serialisation Error: {0}")]
+    SerialisationError(#[from] EncodeError),
+    #[error("Deserialisation Error: {0}")]
     DeserialisationError(String),
+    #[error("User Already Exists: {0}")]
     UserAlreadyExists(String),
 }
-impl fmt::Display for StoreError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            StoreError::DatabaseError(str) => write!(f, "{}", str),
-            StoreError::SqliteError(str) => write!(f, "Sqlite Error: {}", str),
-            StoreError::SerialisationError(str) => write!(f, "{}", str),
-            StoreError::DeserialisationError(str) => write!(f, "{}", str),
-            StoreError::UserAlreadyExists(str) => write!(f, "{}", str),
-        }
-    }
-}
+// impl fmt::Display for StoreError {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         match self {
+//             StoreError::DatabaseError(str) => write!(f, "{}", str),
+//             StoreError::SqliteError(str) => write!(f, "Sqlite Error: {}", str),
+//             StoreError::SerialisationError(str) => write!(f, "{}", str),
+//             StoreError::DeserialisationError(str) => write!(f, "{}", str),
+//             StoreError::UserAlreadyExists(str) => write!(f, "{}", str),
+//         }
+//     }
+// }
 
-impl From<rusqlite::Error> for StoreError {
-    fn from(err: rusqlite::Error) -> StoreError {
-        StoreError::SqliteError(err.to_string())
-    }
-}
-
-impl From<DatabaseError> for StoreError {
-    fn from(err: DatabaseError) -> Self {
-        StoreError::DatabaseError(err)
-    }
-}
+// impl From<rusqlite::Error> for StoreError {
+//     fn from(err: rusqlite::Error) -> StoreError {
+//         StoreError::SqliteError(err)
+//     }
+// }
+//
+// impl From<DatabaseError> for StoreError {
+//     fn from(err: DatabaseError) -> Self {
+//         StoreError::DatabaseError(err)
+//     }
+// }

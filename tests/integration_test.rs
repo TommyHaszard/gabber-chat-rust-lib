@@ -82,7 +82,7 @@ fn test_happy_path() {
         String::from_utf8_lossy(&plain_text.clone()),
         String::from_utf8_lossy(&message1.clone())
     );
-    cleanup_test_db()
+    cleanup_test_db(tx_3)
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn messaging_test() {
     );
 
     assert_eq!(&plain_text, &message1.as_bytes());
-    cleanup_test_db()
+    cleanup_test_db(tx_6)
 }
 
 #[test]
@@ -344,5 +344,5 @@ fn messaging_test_unordered_message() {
     );
 
     assert_eq!(&plain_text, &message1.as_bytes());
-    //cleanup_test_db()
+    cleanup_test_db(tx_6)
 }
