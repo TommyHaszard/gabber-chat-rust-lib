@@ -1,5 +1,4 @@
 use crate::libs::encryption::double_ratchet::{DoubleRatchet, SymmetricChainState};
-use crate::libs::models::{IdentityKey, MessageType};
 use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::DatabaseError;
 use bincode::config::standard;
@@ -8,6 +7,7 @@ use rusqlite::params;
 use std::{fmt, format};
 use thiserror::Error;
 use x25519_dalek::PublicKey;
+use crate::libs::core::models::{IdentityKey, MessageType};
 
 pub trait Storage {
     type Transaction<'s>: Transactional + ProtocolStore + 's
@@ -25,6 +25,7 @@ pub trait UserStore {
     fn create_user(&mut self, username: String, public_key: [u8; 32]) -> Result<(), StoreError>;
     fn load_user_by_name(&mut self, user_id: &String) -> Result<UserRecord, StoreError>;
     fn load_user_by_id(&mut self, user_id: IdentityKey) -> Result<UserRecord, StoreError>;
+    fn load_user_by_device_id(&mut self, device_id: String) -> Result<UserRecord, StoreError>;
 }
 
 pub trait SessionStore {
@@ -39,7 +40,7 @@ pub trait SessionStore {
         peer_id: &IdentityKey,
         peer_device: &IdentityKey,
         double_ratchet: &DoubleRatchet,
-    ) -> std::result::Result<(), StoreError>;
+    ) -> Result<(), StoreError>;
     fn store_session(&mut self, record: &SessionRecord) -> Result<(), StoreError>;
 }
 
@@ -77,17 +78,20 @@ pub trait ProtocolStore: SessionStore + SymmetricChainStore + UserStore + Messag
 #[derive(Error, Debug)]
 pub enum StoreError {
     #[error("Database Error: {0}")]
-    DatabaseError(#[from] DatabaseError),
+    Database(#[from] DatabaseError),
     #[error("Sqlite Error: {0}")]
-    SqliteError(#[from] rusqlite::Error),
+    Sqlite(#[from] rusqlite::Error),
     #[error("ConnectionPool Error: {0}")]
-    ConnectionPoolError(#[from] r2d2::Error),
+    ConnectionPool(#[from] r2d2::Error),
     #[error("Serialisation Error: {0}")]
-    SerialisationError(#[from] EncodeError),
+    Serialisation(#[from] EncodeError),
     #[error("Deserialisation Error: {0}")]
-    DeserialisationError(String),
+    Deserialisation(String),
     #[error("User Already Exists: {0}")]
     UserAlreadyExists(String),
+    #[error("Transaction Error: {0}")]
+    Transaction(String),
+
 }
 // impl fmt::Display for StoreError {
 //     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

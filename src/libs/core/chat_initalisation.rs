@@ -1,11 +1,11 @@
 use crate::libs::encryption::double_ratchet::{
     DHKeyGenerator, DHKeyPair, DoubleRatchet, KeySecret,
 };
-use crate::libs::models::IdentityKey;
 use crate::libs::storage::records::{SessionRecord, UserRecord};
 use std::array::TryFromSliceError;
 use uuid::Uuid;
 use x25519_dalek::{PublicKey, StaticSecret};
+use crate::libs::core::models::IdentityKey;
 
 // Define key size constant
 const KEY_SIZE: usize = 32;

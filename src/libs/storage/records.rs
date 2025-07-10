@@ -1,7 +1,7 @@
 use crate::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
-use crate::libs::models::{IdentityKey, MessageType};
 use uuid::Uuid;
 use x25519_dalek::PublicKey;
+use crate::libs::core::models::{IdentityKey, MessageType};
 
 pub struct UserRecord {
     pub user_id: IdentityKey,

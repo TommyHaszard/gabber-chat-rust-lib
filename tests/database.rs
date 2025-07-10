@@ -2,16 +2,16 @@ mod common;
 
 use crate::common::*;
 use gabber_chat_lib::libs::encryption::double_ratchet::{RealKeyGenerator, SymmetricChainState};
-use gabber_chat_lib::libs::models::{IdentityKey, MessageType};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
 use gabber_chat_lib::libs::storage::records::{SessionRecord, UserRecord};
-use gabber_chat_lib::libs::storage::storage_traits::{
+use gabber_chat_lib::libs::storage::database::storage_traits::{
     MessageStore, SessionStore, SymmetricChainStore, Transactional, UserStore,
 };
 use gabber_chat_lib::*;
 use std::sync::Once;
 use uuid::Uuid;
+use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType};
 
 static TEST_DIR: &str = "./tests/test_db_dir";
 static INIT: Once = Once::new();

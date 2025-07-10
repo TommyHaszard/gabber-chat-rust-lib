@@ -2,32 +2,24 @@ pub mod libs;
 use crate::libs::storage::database::database::DATABASE;
 use crate::libs::storage::database::storage_sqllite::{SqliteStore, SqliteTransaction};
 use crate::libs::storage::database::{database, storage_sqllite};
-use crate::libs::storage::storage_traits::{Storage, Transactional, UserStore};
+use libs::storage::database::storage_traits::{Storage, Transactional, UserStore};
 use std::error::Error;
 use std::fmt;
+use crate::libs::storage::lib_sqlite_impl;
 
 uniffi::include_scaffolding!("gabber_chat_lib");
 
-pub fn init_database(path: String) {
-    let _ = database::initialize_database(path);
+pub fn init_database(path: String) -> Result<(), DatabaseError> {
+    lib_sqlite_impl::init_database(path)
 }
 
+pub fn load_current_user(device_id: String) -> Result<(), DatabaseError> {
+    lib_sqlite_impl::load_current_user(device_id)    
+}
+
+
 pub fn create_user(name: String, public_key: Vec<u8>) -> Result<(), DatabaseError> {
-    let database_pool = DATABASE.get().unwrap();
-    let mut connection = database_pool.new_connection().unwrap();
-
-    let mut sqlite_transaction = SqliteTransaction::new(&mut connection)
-        .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err)))?;
-    // Just verify the connection works
-    if public_key.len() != 32 {
-        return Err(DatabaseError::InvalidLength(32, public_key.len()));
-    }
-    sqlite_transaction
-        .create_user(name, public_key.try_into().unwrap())
-        .map_err(|e| DatabaseError::RetrievalError(e.to_string()))?;
-
-    sqlite_transaction.commit();
-    Ok(())
+    lib_sqlite_impl::create_user(name, public_key)
 }
 
 pub fn send_message(receiver: String, content: String) -> Result<(), DatabaseError> {

@@ -1,12 +1,5 @@
-use crate::libs::chat_initalisation::ChatInitError;
-use crate::libs::chat_initalisation::ChatInitError::DeserialiseError;
-use crate::libs::models::MessageType::{Passing, Received, Sent};
-use crate::libs::storage::records::MessageRecord;
-use crate::DatabaseError;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
-use serde::{Deserialize, Serialize};
-use std::fmt::Error;
 use uuid::Uuid;
 
 enum ModelError {
@@ -53,9 +46,9 @@ impl FromSql for MessageType {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         let message_type = value.as_str()?;
         match message_type {
-            "sent" => Ok(Sent),
-            "received" => Ok(Received),
-            "passing" => Ok(Passing),
+            "sent" => Ok(MessageType::Sent),
+            "received" => Ok(MessageType::Received),
+            "passing" => Ok(MessageType::Passing),
             _ => Err(FromSqlError::InvalidType),
         }
     }
@@ -64,9 +57,9 @@ impl FromSql for MessageType {
 impl ToSql for MessageType {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         match self {
-            Sent => Ok(ToSqlOutput::from("sent")),
-            Received => Ok(ToSqlOutput::from("received")),
-            Passing => Ok(ToSqlOutput::from("passing")),
+            MessageType::Sent => Ok(ToSqlOutput::from("sent")),
+            MessageType::Received => Ok(ToSqlOutput::from("received")),
+            MessageType::Passing => Ok(ToSqlOutput::from("passing")),
         }
     }
 }

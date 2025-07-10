@@ -1,9 +1,8 @@
 use crate::libs::encryption::double_ratchet::{
     DoubleRatchet, KeySecret, MessageId, SymmetricChainState,
 };
-use crate::libs::models::{IdentityKey, MessageType};
 use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
-use crate::libs::storage::storage_traits::{
+use crate::libs::storage::database::storage_traits::{
     MessageStore, ProtocolStore, SessionStore, Storage, StoreError, SymmetricChainStore,
     Transactional, UserStore,
 };
@@ -16,6 +15,7 @@ use rusqlite::{params, Connection, Error, OptionalExtension, Result, Transaction
 use std::collections::HashMap;
 use uuid::Uuid;
 use x25519_dalek::PublicKey;
+use crate::libs::core::models::{IdentityKey, MessageType};
 
 pub struct SqliteTransaction<'conn> {
     tx: Transaction<'conn>,
@@ -40,7 +40,7 @@ impl<'conn> Transactional for SqliteTransaction<'conn> {
     }
 
     fn rollback(self) -> Result<(), StoreError> {
-        self.tx.rollback().map_err(StoreError::SqliteError)
+        self.tx.rollback().map_err(StoreError::Sqlite)
     }
 }
 
@@ -151,6 +151,25 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
             .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
 
         Ok(())
+    }
+
+    fn load_user_by_device_id(&mut self, device_id: String) -> std::result::Result<UserRecord, StoreError> {
+        let mut stmt = self
+            .tx
+            .prepare("SELECT user_id FROM devices WHERE device_id = ?")?;
+        let user_identity_key = stmt.query_row([&device_id], |row| {
+            let user_id: IdentityKey = row.get(0)?;
+            Ok(user_id)
+        })?;
+        // close this stmt to allow reborrow
+        match stmt.finalize() {
+            Ok(_) => {
+                self.load_user_by_id(user_identity_key)
+            },
+            Err(stmt_error) => {
+                Err(StoreError::Transaction(format!("Failed to close stmt for retrieving User_Id from Device_id from table Device: {}", stmt_error)))
+            }
+        }
     }
 }
 

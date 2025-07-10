@@ -1,14 +1,14 @@
 use crate::common::*;
 use chacha20poly1305::aead::rand_core::RngCore;
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, RealKeyGenerator};
-use gabber_chat_lib::libs::models::{IdentityKey, MessageType};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
 use gabber_chat_lib::libs::storage::records::SessionRecord;
-use gabber_chat_lib::libs::storage::storage_traits::{
+use gabber_chat_lib::libs::storage::database::storage_traits::{
     MessageStore, SessionStore, Transactional, UserStore,
 };
 use std::sync::Once;
+use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType};
 
 mod common;
 static TEST_DIR: &str = "./tests/test_db_dir";

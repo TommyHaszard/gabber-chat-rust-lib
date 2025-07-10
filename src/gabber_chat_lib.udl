@@ -1,5 +1,6 @@
 namespace gabber_chat_lib {
     // Initialize the database
+    [Throws=DatabaseError]
     void init_database(string path);
 
     // User management
