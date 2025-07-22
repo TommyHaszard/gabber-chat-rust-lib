@@ -15,7 +15,7 @@ use rusqlite::{params, Connection, Error, OptionalExtension, Result, Transaction
 use std::collections::HashMap;
 use uuid::Uuid;
 use x25519_dalek::PublicKey;
-use crate::libs::core::models::{IdentityKey, MessageType};
+use crate::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 
 pub struct SqliteTransaction<'conn> {
     tx: Transaction<'conn>,
@@ -71,52 +71,6 @@ impl Storage for SqliteStore {
 impl<'conn> ProtocolStore for SqliteTransaction<'conn> {}
 
 impl<'conn> UserStore for SqliteTransaction<'conn> {
-    fn load_user_by_id(&mut self, user_id: IdentityKey) -> Result<UserRecord, StoreError> {
-        let mut stmt = self.tx.prepare("SELECT data FROM user WHERE userid = ?")?;
-        let user = stmt.query_row([&user_id], |row| {
-            let pk_bytes: Vec<u8> = row.get(1)?;
-            let public_key_array: [u8; 32] = pk_bytes.try_into().map_err(|_vec_err| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    1, // Column index
-                    rusqlite::types::Type::Blob,
-                    "Public key blob was not 32 bytes long.".into(),
-                )
-            })?;
-            let public_key = PublicKey::from(public_key_array);
-            Ok(UserRecord {
-                user_id: row.get(0)?,
-                public_key,
-                username: row.get(2)?,
-                is_stale: row.get(3)?,
-            })
-        })?;
-        Ok(user)
-    }
-
-    fn load_user_by_name(&mut self, user_name: &String) -> Result<UserRecord, StoreError> {
-        let mut stmt = self
-            .tx
-            .prepare("SELECT user_id, username, public_key FROM users WHERE username = ?")?;
-        let user = stmt.query_row([&user_name], |row| {
-            let pk_bytes: Vec<u8> = row.get(2)?;
-            let public_key_array: [u8; 32] = pk_bytes.try_into().map_err(|_vec_err| {
-                rusqlite::Error::FromSqlConversionFailure(
-                    1, // Column index
-                    rusqlite::types::Type::Blob,
-                    "Public key blob was not 32 bytes long.".into(),
-                )
-            })?;
-            let public_key = PublicKey::from(public_key_array);
-            Ok(UserRecord {
-                user_id: row.get(0)?,
-                username: row.get(1)?,
-                public_key,
-                is_stale: false,
-            })
-        })?;
-        Ok(user)
-    }
-
     fn store_user(&mut self, record: &UserRecord) -> Result<(), StoreError> {
         self.tx
             .execute(
@@ -124,14 +78,14 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
                 params![
                     record.user_id.uuid.to_string(),
                     record.username,
-                    record.public_key.as_bytes(),
+                    record.public_key.bytes.as_slice(),
                 ],
             )
             .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
         Ok(())
     }
 
-    fn create_user(&mut self, username: String, public_key: [u8; 32]) -> Result<(), StoreError> {
+    fn create_user(&mut self, username: String, public_key: &PublicKeyInternal) -> Result<(), StoreError> {
         // check username already exists and fail
 
         let count: i64 = self.tx.query_row(
@@ -146,14 +100,42 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
         self.tx
             .execute(
                 "INSERT INTO users (user_id, username, public_key) VALUES (?1, ?2, ?3)",
-                params![Uuid::now_v7().to_string(), username, public_key],
+                params![Uuid::now_v7().to_string(), username, public_key.bytes],
             )
             .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
 
         Ok(())
     }
 
-    fn load_user_by_device_id(&mut self, device_id: String) -> std::result::Result<UserRecord, StoreError> {
+    fn load_user_by_name(&mut self, user_name: &String) -> Result<UserRecord, StoreError> {
+        let mut stmt = self
+            .tx
+            .prepare("SELECT user_id, username, public_key FROM users WHERE username = ?")?;
+        let user = stmt.query_row([&user_name], |row| {
+            Ok(UserRecord {
+                user_id: row.get(0)?,
+                username: row.get(1)?,
+                public_key: row.get(2)?,
+                is_stale: false,
+            })
+        })?;
+        Ok(user)
+    }
+
+    fn load_user_by_id(&mut self, user_id: &IdentityKey) -> Result<UserRecord, StoreError> {
+        let mut stmt = self.tx.prepare("SELECT user_id, username, public_key FROM user WHERE user_id = ?")?;
+        let user = stmt.query_row([&user_id], |row| {
+            Ok(UserRecord {
+                user_id: row.get(0)?,
+                public_key: row.get(1)?,
+                username: row.get(2)?,
+                is_stale: row.get(3)?,
+            })
+        })?;
+        Ok(user)
+    }
+
+    fn load_user_by_device_id(&mut self, device_id: &IdentityKey) -> std::result::Result<UserRecord, StoreError> {
         let mut stmt = self
             .tx
             .prepare("SELECT user_id FROM devices WHERE device_id = ?")?;
@@ -164,12 +146,26 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
         // close this stmt to allow reborrow
         match stmt.finalize() {
             Ok(_) => {
-                self.load_user_by_id(user_identity_key)
+                self.load_user_by_id(&user_identity_key)
             },
             Err(stmt_error) => {
                 Err(StoreError::Transaction(format!("Failed to close stmt for retrieving User_Id from Device_id from table Device: {}", stmt_error)))
             }
         }
+    }
+
+    fn load_user_by_pub_key(&mut self, pub_key: &PublicKeyInternal) -> std::result::Result<UserRecord, StoreError> {
+        let mut stmt = self.tx.prepare("SELECT user_id, public_key, username, is_stale FROM user WHERE public_key = ?")?;
+        let user = stmt.query_row([&pub_key], |row| {
+            Ok(UserRecord {
+                user_id: row.get(0)?,
+                public_key: row.get(1)?,
+                username: row.get(2)?,
+                is_stale: row.get(3)?,
+            })
+        })?;
+        Ok(user)
+
     }
 }
 
@@ -338,16 +334,16 @@ impl<'conn> SymmetricChainStore for SqliteTransaction<'conn> {
 impl<'conn> MessageStore for SqliteTransaction<'conn> {
     fn store_message(
         &mut self,
-        peer: &PublicKey,
+        peer: &PublicKeyInternal,
         message_type: &MessageType,
         content: &str,
     ) -> std::result::Result<(), StoreError> {
         self.tx
             .execute(
-                "INSERT INTO messages(message_id, recipient_id, message_type, content) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO messages(message_id, public_key, message_type, content) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     Uuid::now_v7().to_string(),
-                    peer.as_bytes(),
+                    peer.bytes,
                     message_type,
                     content
                 ],
@@ -359,31 +355,91 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
 
     fn retrieve_message_for_recipient(
         &mut self,
-        peer: &PublicKey,
+        peer: &PublicKeyInternal,
     ) -> std::result::Result<Vec<MessageRecord>, StoreError> {
         let mut stmt = self.tx.prepare(
-            "SELECT message_id, message_type, content
+            "SELECT message_id, public_key, message_type, content, created_at
              FROM messages
-             WHERE recipient_id = ?",
+             WHERE public_key = ?",
         )?;
 
-        let rows = stmt.query(params![peer.as_bytes()])?;
+        let rows = stmt.query(params![peer.bytes])?;
 
         let messages = rows
             .map(|row| {
                 Ok(MessageRecord::from_db(
                     row.get(0)?,
-                    peer.clone(),
-                    MessageType::from(row.get(1)?),
-                    row.get(2)?,
+                    row.get(1)?,
+                    MessageType::from(row.get(2)?),
+                    row.get(3)?,
+                    row.get(4)?,
                 ))
             })
             .collect()?;
 
         Ok(messages)
     }
+
+    fn load_recent_messages_per_user(&mut self) -> Result<Vec<MessageRecord>, StoreError> {
+        let mut stmt = self.tx.prepare(
+           "WITH RankedMessages AS (
+                      SELECT
+                        m.message_id,
+                        m.recipient_id,
+                        m.message_type,
+                        m.content,
+                        m.created_at,
+                        ROW_NUMBER() OVER (
+                          PARTITION BY m.recipient_id
+                          ORDER BY
+                            m.created_at DESC
+                        ) AS rn
+                      FROM
+                        messages m
+                    )
+                    SELECT
+                      rm.message_id,
+                      rm.recipient_id,
+                      rm.message_type,
+                      rm.content,
+                      rm.created_at
+                    FROM
+                      RankedMessages rm
+                    WHERE
+                      rm.rn = 1
+                    order by rm.created_at desc",
+        )?;
+
+        let rows = stmt.query([])?;
+
+        let messages = rows
+            .map(|row| {
+                Ok(MessageRecord::from_db(
+                    row.get(0)?,
+                    row.get(1)?,
+                     MessageType::from(row.get(2)?),
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .collect()?;
+
+        Ok(messages)
+
+    }
 }
 
 pub fn generate_chain_record_id(session_id: &IdentityKey, chain_identifier: &str) -> String {
     format!("{}_{}", session_id.uuid, chain_identifier)
+}
+
+fn get_pub_key_from_bytes(pk_bytes: Vec<u8>) -> Result<PublicKey, StoreError> {
+    let public_key_array: [u8; 32] = pk_bytes.try_into().map_err(|_vec_err| {
+        rusqlite::Error::FromSqlConversionFailure(
+            1, // Column index
+            rusqlite::types::Type::Blob,
+            "Public key blob was not 32 bytes long.".into(),
+        )
+    })?;
+    Ok(PublicKey::from(public_key_array))
 }

@@ -1,14 +1,39 @@
+use hmac::digest::typenum::Mod;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
 use uuid::Uuid;
 
-enum ModelError {
+pub enum ModelError {
     ConversionError(String),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub struct IdentityKey {
     pub uuid: Uuid,
+}
+
+impl TryFrom<Vec<u8>> for IdentityKey {
+    type Error = ModelError;
+
+    fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
+        identity_key_from_vec(vec)
+    }
+}
+
+fn identity_key_from_vec(vec: Vec<u8>) -> Result<IdentityKey, ModelError> {
+    if vec.len() != 16 {
+        return Err(ModelError::ConversionError("Vec Length greater then 16 bytes.".to_string()));
+    }
+
+    let bytes: [u8; 16] = vec.try_into().map_err(|_| ModelError::ConversionError("Vec Length greater then 16 bytes.".to_string()))?;
+    
+    Ok(IdentityKey::from(bytes))
+}
+
+impl From<IdentityKey> for Vec<u8> {
+    fn from(id: IdentityKey) -> Self {
+        id.uuid.as_bytes().to_vec()
+    }
 }
 
 impl From<[u8; 16]> for IdentityKey {
@@ -34,6 +59,38 @@ impl FromSql for IdentityKey {
             .map_err(|e| FromSqlError::Other(Box::new(e))) // Convert Uuid parse error
     }
 }
+
+#[derive(Debug, Clone, Hash, )]
+#[derive(Eq, PartialEq)]
+pub struct PublicKeyInternal {
+    pub bytes: Vec<u8>,
+}
+impl From<Vec<u8>> for PublicKeyInternal {
+    fn from(bytes: Vec<u8>) -> PublicKeyInternal {
+        PublicKeyInternal { bytes }
+    }
+}
+
+impl From<[u8; 32]> for PublicKeyInternal {
+    fn from(bytes: [u8; 32]) -> PublicKeyInternal {
+        PublicKeyInternal { bytes: bytes.into() }
+    }
+}
+
+
+impl ToSql for PublicKeyInternal {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.bytes.as_slice()))
+    }
+}
+
+impl FromSql for PublicKeyInternal {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let bytes = value.as_bytes()?.to_vec();
+        Ok(PublicKeyInternal { bytes })
+    }
+}
+
 
 #[derive(Debug, PartialEq)]
 pub enum MessageType {

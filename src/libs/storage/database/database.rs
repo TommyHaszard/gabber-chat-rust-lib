@@ -67,7 +67,7 @@ pub fn db_migration(path: String) -> Result<(), DatabaseError> {
         .execute(
             "CREATE TABLE IF NOT EXISTS messages (
             message_id TEXT PRIMARY KEY,
-            recipient_id BLOB NOT NULL,
+            public_key BLOB NOT NULL,
             message_type TEXT NOT NULL,
             content BLOB NOT NULL,
             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
