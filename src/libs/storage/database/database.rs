@@ -3,22 +3,19 @@ use std::cell::OnceCell;
 use std::sync::{Mutex, Once, OnceLock};
 
 use crate::libs::storage::database::storage_sqllite::{SqliteStore, SqliteTransaction};
-use crate::libs::storage::storage_traits::{Storage, StoreError, Transactional};
+use crate::libs::storage::database::storage_traits::{Storage, StoreError, Transactional};
 use crate::DatabaseError;
 
 static INIT: Once = Once::new();
 pub static DATABASE: OnceLock<SqliteStore> = OnceLock::new();
 
 pub(crate) fn initialize_database(path: String) -> Result<(), DatabaseError> {
-    // Now you can get the database instance:
     if let Some(db) = DATABASE.get() {
-        // Use the database (e.g., get a transaction, perform queries)
         let database_pool = DATABASE.get().unwrap();
         let mut connection = database_pool.new_connection().unwrap();
 
         let sqlite_transaction = SqliteTransaction::new(&mut connection)
             .map_err(|err| DatabaseError::InitializationError(format!("{:?}", err)))?;
-        // Just verify the connection works
         sqlite_transaction
             .inner()
             .execute("SELECT 1", [])
@@ -70,7 +67,7 @@ pub fn db_migration(path: String) -> Result<(), DatabaseError> {
         .execute(
             "CREATE TABLE IF NOT EXISTS messages (
             message_id TEXT PRIMARY KEY,
-            recipient_id BLOB NOT NULL,
+            public_key BLOB NOT NULL,
             message_type TEXT NOT NULL,
             content BLOB NOT NULL,
             created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),

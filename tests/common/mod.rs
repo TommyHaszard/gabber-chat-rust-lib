@@ -2,7 +2,7 @@ use gabber_chat_lib::init_database;
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::storage_traits::Transactional;
+use gabber_chat_lib::libs::storage::database::storage_traits::Transactional;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use rusqlite::Connection;

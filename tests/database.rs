@@ -1,14 +1,14 @@
 mod common;
 
 use crate::common::*;
+use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 use gabber_chat_lib::libs::encryption::double_ratchet::{RealKeyGenerator, SymmetricChainState};
-use gabber_chat_lib::libs::models::{IdentityKey, MessageType};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::records::{SessionRecord, UserRecord};
-use gabber_chat_lib::libs::storage::storage_traits::{
+use gabber_chat_lib::libs::storage::database::storage_traits::{
     MessageStore, SessionStore, SymmetricChainStore, Transactional, UserStore,
 };
+use gabber_chat_lib::libs::storage::records::{SessionRecord, UserRecord};
 use gabber_chat_lib::*;
 use std::sync::Once;
 use uuid::Uuid;
@@ -43,12 +43,12 @@ fn test_storing_retrieving_session() {
     let mut connection = database_pool.new_connection().unwrap();
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();
@@ -95,9 +95,10 @@ fn test_storing_retrieving_message() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let bob_username = "BOB".to_string();
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();
@@ -131,8 +132,8 @@ fn test_storing_retrieving_message() {
     assert_eq!(message.message_type, message_type);
     assert_eq!(message.content, message_content);
     assert_eq!(
-        message.recipient_public_key.as_bytes(),
-        message.recipient_public_key.as_bytes()
+        message.recipient_public_key.bytes,
+        bob_user.public_key.bytes
     );
 
     cleanup_test_db(tx_3)
@@ -144,12 +145,13 @@ fn test_symmetric_chain_storage() {
     let mut connection = database_pool.new_connection().unwrap();
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
+
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();

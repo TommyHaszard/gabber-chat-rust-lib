@@ -1,12 +1,11 @@
+use crate::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 use crate::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
-use crate::libs::models::{IdentityKey, MessageType};
 use uuid::Uuid;
-use x25519_dalek::PublicKey;
 
 pub struct UserRecord {
     pub user_id: IdentityKey,
     pub username: String,
-    pub public_key: PublicKey,
+    pub public_key: PublicKeyInternal,
     pub is_stale: bool,
 }
 
@@ -20,7 +19,7 @@ impl UserRecord {
         Self {
             user_id,
             username,
-            public_key: PublicKey::from(public_key_array),
+            public_key: PublicKeyInternal::from(public_key_array),
             is_stale,
         }
     }
@@ -57,14 +56,15 @@ impl SessionRecord {
 #[derive(Debug)]
 pub struct MessageRecord {
     pub message_id: IdentityKey,
-    pub recipient_public_key: PublicKey,
+    pub recipient_public_key: PublicKeyInternal,
     pub message_type: MessageType,
     pub content: String,
+    pub created_at: Option<u64>,
 }
 
 impl MessageRecord {
     pub fn new(
-        recipient_public_key: PublicKey,
+        recipient_public_key: PublicKeyInternal,
         message_type: MessageType,
         content: String,
     ) -> Self {
@@ -73,20 +73,23 @@ impl MessageRecord {
             recipient_public_key,
             message_type,
             content,
+            created_at: None,
         }
     }
 
     pub fn from_db(
         message_id: IdentityKey,
-        recipient_public_key: PublicKey,
+        recipient_public_key: PublicKeyInternal,
         message_type: MessageType,
         content: String,
+        created_at: u64,
     ) -> Self {
         Self {
             message_id,
             recipient_public_key,
             message_type,
             content,
+            created_at: Option::from(created_at),
         }
     }
 }

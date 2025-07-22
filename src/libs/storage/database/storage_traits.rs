@@ -1,5 +1,5 @@
+use crate::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 use crate::libs::encryption::double_ratchet::{DoubleRatchet, SymmetricChainState};
-use crate::libs::models::{IdentityKey, MessageType};
 use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::DatabaseError;
 use bincode::config::standard;
@@ -22,9 +22,13 @@ pub trait Transactional {
 
 pub trait UserStore {
     fn store_user(&mut self, record: &UserRecord) -> Result<(), StoreError>;
-    fn create_user(&mut self, username: String, public_key: [u8; 32]) -> Result<(), StoreError>;
+    fn create_user(&mut self, username: String, public_key: &PublicKeyInternal) -> Result<(), StoreError>;
     fn load_user_by_name(&mut self, user_id: &String) -> Result<UserRecord, StoreError>;
-    fn load_user_by_id(&mut self, user_id: IdentityKey) -> Result<UserRecord, StoreError>;
+    fn load_user_by_id(&mut self, user_id: &IdentityKey) -> Result<UserRecord, StoreError>;
+    fn load_user_by_device_id(&mut self, device_id: &IdentityKey) -> Result<UserRecord, StoreError>;   
+    fn load_user_by_pub_key(&mut self, pub_key: &PublicKeyInternal) -> Result<UserRecord, StoreError>;
+    
+
 }
 
 pub trait SessionStore {
@@ -39,7 +43,7 @@ pub trait SessionStore {
         peer_id: &IdentityKey,
         peer_device: &IdentityKey,
         double_ratchet: &DoubleRatchet,
-    ) -> std::result::Result<(), StoreError>;
+    ) -> Result<(), StoreError>;
     fn store_session(&mut self, record: &SessionRecord) -> Result<(), StoreError>;
 }
 
@@ -61,15 +65,17 @@ pub trait SymmetricChainStore {
 pub trait MessageStore {
     fn store_message(
         &mut self,
-        peer: &PublicKey,
+        peer: &PublicKeyInternal,
         message_type: &MessageType,
         content: &str,
     ) -> Result<(), StoreError>;
 
     fn retrieve_message_for_recipient(
         &mut self,
-        peer: &PublicKey,
+        peer: &PublicKeyInternal,
     ) -> Result<Vec<MessageRecord>, StoreError>;
+
+    fn load_recent_messages_per_user(&mut self) -> Result<Vec<MessageRecord>, StoreError>;
 }
 
 pub trait ProtocolStore: SessionStore + SymmetricChainStore + UserStore + MessageStore {}
@@ -77,38 +83,17 @@ pub trait ProtocolStore: SessionStore + SymmetricChainStore + UserStore + Messag
 #[derive(Error, Debug)]
 pub enum StoreError {
     #[error("Database Error: {0}")]
-    DatabaseError(#[from] DatabaseError),
+    Database(#[from] DatabaseError),
     #[error("Sqlite Error: {0}")]
-    SqliteError(#[from] rusqlite::Error),
+    Sqlite(#[from] rusqlite::Error),
     #[error("ConnectionPool Error: {0}")]
-    ConnectionPoolError(#[from] r2d2::Error),
+    ConnectionPool(#[from] r2d2::Error),
     #[error("Serialisation Error: {0}")]
-    SerialisationError(#[from] EncodeError),
+    Serialisation(#[from] EncodeError),
     #[error("Deserialisation Error: {0}")]
-    DeserialisationError(String),
+    Deserialisation(String),
     #[error("User Already Exists: {0}")]
     UserAlreadyExists(String),
+    #[error("Transaction Error: {0}")]
+    Transaction(String),
 }
-// impl fmt::Display for StoreError {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         match self {
-//             StoreError::DatabaseError(str) => write!(f, "{}", str),
-//             StoreError::SqliteError(str) => write!(f, "Sqlite Error: {}", str),
-//             StoreError::SerialisationError(str) => write!(f, "{}", str),
-//             StoreError::DeserialisationError(str) => write!(f, "{}", str),
-//             StoreError::UserAlreadyExists(str) => write!(f, "{}", str),
-//         }
-//     }
-// }
-
-// impl From<rusqlite::Error> for StoreError {
-//     fn from(err: rusqlite::Error) -> StoreError {
-//         StoreError::SqliteError(err)
-//     }
-// }
-//
-// impl From<DatabaseError> for StoreError {
-//     fn from(err: DatabaseError) -> Self {
-//         StoreError::DatabaseError(err)
-//     }
-// }

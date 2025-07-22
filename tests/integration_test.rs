@@ -1,13 +1,13 @@
 use crate::common::*;
 use chacha20poly1305::aead::rand_core::RngCore;
+use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, RealKeyGenerator};
-use gabber_chat_lib::libs::models::{IdentityKey, MessageType};
 use gabber_chat_lib::libs::storage::database::database::DATABASE;
 use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::records::SessionRecord;
-use gabber_chat_lib::libs::storage::storage_traits::{
+use gabber_chat_lib::libs::storage::database::storage_traits::{
     MessageStore, SessionStore, Transactional, UserStore,
 };
+use gabber_chat_lib::libs::storage::records::SessionRecord;
 use std::sync::Once;
 
 mod common;
@@ -25,12 +25,12 @@ fn test_happy_path() {
     let mut connection = database_pool.new_connection().unwrap();
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();
@@ -91,12 +91,12 @@ fn messaging_test() {
     let mut connection = database_pool.new_connection().unwrap();
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();
@@ -126,15 +126,17 @@ fn messaging_test() {
 
     let message1 = "Hi Bob, this is Alice";
 
+    let public_key_internal = PublicKeyInternal::from(alice.dhs.public.to_bytes());
+
     // store and retrieve message from Sender to send to Receiver
-    tx_3.store_message(&alice.dhs.public, &MessageType::Sent, &message1);
+    tx_3.store_message(&public_key_internal, &MessageType::Sent, &message1);
     tx_3.commit();
 
     let mut tx_4 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages = tx_4
-        .retrieve_message_for_recipient(&alice.dhs.public)
+        .retrieve_message_for_recipient(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -178,15 +180,16 @@ fn messaging_test() {
 
     let message_2 = "Hi Bob, this is Alice_2";
 
+    let public_key_internal = PublicKeyInternal::from(alice.dhs.public.to_bytes());
     // store and retrieve message from Sender to send to Receiver
-    tx_5.store_message(&alice.dhs.public, &MessageType::Sent, &message_2);
+    tx_5.store_message(&public_key_internal, &MessageType::Sent, &message_2);
     tx_5.commit();
 
     let mut tx_6 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages_retrieved_2 = tx_6
-        .retrieve_message_for_recipient(&alice.dhs.public)
+        .retrieve_message_for_recipient(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);
@@ -222,12 +225,12 @@ fn messaging_test_unordered_message() {
     let mut connection = database_pool.new_connection().unwrap();
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
-    let public_key = [1; 32];
+    let public_key = PublicKeyInternal::from([1; 32]);
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
-    tx_1.create_user(bob_username.clone(), public_key.try_into().unwrap())
+    tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
     tx_1.commit();
@@ -258,14 +261,16 @@ fn messaging_test_unordered_message() {
     let message1 = "Hi Bob, this is Alice";
 
     // store and retrieve message from Sender to send to Receiver
-    tx_3.store_message(&alice.dhs.public, &MessageType::Sent, &message1);
+    let public_key_internal = PublicKeyInternal::from(alice.dhs.public.to_bytes());
+    
+    tx_3.store_message(&public_key_internal, &MessageType::Sent, &message1);
     tx_3.commit();
 
     let mut tx_4 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages = tx_4
-        .retrieve_message_for_recipient(&alice.dhs.public)
+        .retrieve_message_for_recipient(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -309,15 +314,17 @@ fn messaging_test_unordered_message() {
 
     let message_2 = "Hi Bob, this is Alice_2";
 
+    let public_key_internal = PublicKeyInternal::from(alice.dhs.public.to_bytes());
+
     // store and retrieve message from Sender to send to Receiver
-    tx_5.store_message(&alice.dhs.public, &MessageType::Sent, &message_2);
+    tx_5.store_message(&public_key_internal, &MessageType::Sent, &message_2);
     tx_5.commit();
 
     let mut tx_6 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages_retrieved_2 = tx_6
-        .retrieve_message_for_recipient(&alice.dhs.public)
+        .retrieve_message_for_recipient(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);

@@ -1,20 +1,32 @@
 namespace gabber_chat_lib {
     // Initialize the database
+    [Throws=DatabaseError]
     void init_database(string path);
 
-    // User management
     [Throws=DatabaseError]
     void create_user(string name, sequence<u8> public_key);
 
-    // Message management
+    [Throws=DatabaseError]
+    User load_current_user(sequence<u8> device_uuid);
+
     [Throws=DatabaseError]
     void send_message(string receiver, string content);
 
-    // Sync with a peer
     sequence<string> sync_with_peer(string peer_id);
 
-    // Mark messages as seen
     boolean mark_messages_as_seen(sequence<string> message_ids);
+};
+
+dictionary User {
+    sequence<u8> user_id;
+    string username;
+    UserType user_type;
+};
+
+enum UserType {
+    "Current",
+    "Friend",
+    "Other"
 };
 
 [Error]
