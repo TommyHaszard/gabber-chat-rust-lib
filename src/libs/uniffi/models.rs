@@ -1,8 +1,7 @@
 // Rust models for the UDL types that will be used by front-end
 
-use crate::libs::core::models::IdentityKey;
-
 #[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(uniffi::Enum)]
 pub enum UserType {
     Current,
     Friend,
@@ -10,6 +9,7 @@ pub enum UserType {
 }
 
 #[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(uniffi::Record)]
 pub struct User {
     pub user_id: Vec<u8>,
     pub username: String,
@@ -17,6 +17,7 @@ pub struct User {
 }
 
 #[derive(Clone)]
+#[derive(uniffi::Record)]
 pub struct Message {
     pub message_id: Vec<u8>,
     pub user_id: Vec<u8>,

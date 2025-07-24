@@ -8,18 +8,19 @@ use crate::libs::uniffi::models::{Message, User, UserType};
 use libs::storage::database::storage_traits::{Storage, Transactional, UserStore};
 use std::error::Error;
 use std::fmt;
-use bincode::serde::DecodeError::IdentifierNotSupported;
 
-uniffi::include_scaffolding!("gabber_chat_lib");
+//uniffi::include_scaffolding!("gabber_chat_lib");
+uniffi::setup_scaffolding!("gabber_chat_lib");
 
+#[uniffi::export]
 pub fn init_database(path: String) -> Result<(), DatabaseError> {
     lib_sqlite_impl::init_database(path)
 }
-
+#[uniffi::export]
 pub fn load_current_user(device_id: Vec<u8>) -> Result<User, DatabaseError> {
 
     if device_id.len() != 16 {
-        return Err(DatabaseError::InvalidLength(device_id.len(), 16))
+        return Err(DatabaseError::InvalidLength(device_id.len() as i32, 16))
     }
 
     let device_array: [u8; 16] = device_id
@@ -36,6 +37,7 @@ pub fn load_current_user(device_id: Vec<u8>) -> Result<User, DatabaseError> {
     })
 }
 
+#[uniffi::export]
 pub fn load_current_users_and_messages() -> Result<HashMap<User, Message>, DatabaseError> {
     let recent_message_per_user = lib_sqlite_impl::load_recent_message_per_user()?;
     let user_ids = recent_message_per_user
@@ -83,7 +85,7 @@ pub fn load_current_users_and_messages() -> Result<HashMap<User, Message>, Datab
     
     Ok(result)
 }
-
+#[uniffi::export]
 pub fn create_user(name: String, public_key: Vec<u8>) -> Result<(), DatabaseError> {
     let public_key_internal= PublicKeyInternal::from(public_key);
     lib_sqlite_impl::create_user(name, &public_key_internal)
@@ -106,12 +108,13 @@ pub fn initialise_two_friend_nodes() -> bool {
 }
 
 #[derive(Debug)]
+#[derive(uniffi::Error)]
 pub enum DatabaseError {
     InitializationError(String),
     StorageError(String),
     RetrievalError(String),
     SyncError,
-    InvalidLength(usize, usize),
+    InvalidLength(i32, i32),
 }
 
 impl fmt::Display for DatabaseError {
