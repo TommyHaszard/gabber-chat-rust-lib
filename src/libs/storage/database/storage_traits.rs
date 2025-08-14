@@ -22,13 +22,19 @@ pub trait Transactional {
 
 pub trait UserStore {
     fn store_user(&mut self, record: &UserRecord) -> Result<(), StoreError>;
-    fn create_user(&mut self, username: String, public_key: &PublicKeyInternal) -> Result<(), StoreError>;
+    fn create_user(
+        &mut self,
+        username: String,
+        public_key: &PublicKeyInternal,
+    ) -> Result<(), StoreError>;
     fn load_user_by_name(&mut self, user_id: &String) -> Result<UserRecord, StoreError>;
     fn load_user_by_id(&mut self, user_id: &IdentityKey) -> Result<UserRecord, StoreError>;
-    fn load_user_by_device_id(&mut self, device_id: &IdentityKey) -> Result<UserRecord, StoreError>;   
-    fn load_user_by_pub_key(&mut self, pub_key: &PublicKeyInternal) -> Result<UserRecord, StoreError>;
-    
-
+    fn load_user_by_device_id(&mut self, device_id: &IdentityKey)
+        -> Result<UserRecord, StoreError>;
+    fn load_user_by_pub_key(
+        &mut self,
+        pub_key: &PublicKeyInternal,
+    ) -> Result<UserRecord, StoreError>;
 }
 
 pub trait SessionStore {
@@ -70,12 +76,14 @@ pub trait MessageStore {
         content: &str,
     ) -> Result<(), StoreError>;
 
-    fn retrieve_message_for_recipient(
+    fn retrieve_message_for_public_key(
         &mut self,
         peer: &PublicKeyInternal,
     ) -> Result<Vec<MessageRecord>, StoreError>;
 
     fn load_recent_messages_per_user(&mut self) -> Result<Vec<MessageRecord>, StoreError>;
+
+    fn save_message(&mut self, public_key: &PublicKeyInternal, message: MessageRecord) -> Result<(), StoreError>;
 }
 
 pub trait ProtocolStore: SessionStore + SymmetricChainStore + UserStore + MessageStore {}

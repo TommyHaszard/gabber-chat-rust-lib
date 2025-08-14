@@ -29,8 +29,7 @@ uniffi_build = { version = "0.29.1" }
 
 [lib]
 crate-type = ["cdylib", "staticlib", "lib"]
-#crate-type = ["staticlib", "lib"]
-name = "gabber_chat_lib"
+name = "ChatLib"
 path = "src/lib.rs"
 
 [[bin]]

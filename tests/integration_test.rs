@@ -1,14 +1,14 @@
 use crate::common::*;
 use chacha20poly1305::aead::rand_core::RngCore;
-use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
-use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, RealKeyGenerator};
-use gabber_chat_lib::libs::storage::database::database::DATABASE;
-use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::database::storage_traits::{
+use std::sync::Once;
+use ChatLib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
+use ChatLib::libs::encryption::double_ratchet::{DHKeyGenerator, RealKeyGenerator};
+use ChatLib::libs::storage::database::database::DATABASE;
+use ChatLib::libs::storage::database::storage_sqllite::SqliteTransaction;
+use ChatLib::libs::storage::database::storage_traits::{
     MessageStore, SessionStore, Transactional, UserStore,
 };
-use gabber_chat_lib::libs::storage::records::SessionRecord;
-use std::sync::Once;
+use ChatLib::libs::storage::records::SessionRecord;
 
 mod common;
 static TEST_DIR: &str = "./tests/test_db_dir";
@@ -136,7 +136,7 @@ fn messaging_test() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages = tx_4
-        .retrieve_message_for_recipient(&public_key_internal)
+        .retrieve_message_for_public_key(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -189,7 +189,7 @@ fn messaging_test() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages_retrieved_2 = tx_6
-        .retrieve_message_for_recipient(&public_key_internal)
+        .retrieve_message_for_public_key(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);
@@ -262,7 +262,7 @@ fn messaging_test_unordered_message() {
 
     // store and retrieve message from Sender to send to Receiver
     let public_key_internal = PublicKeyInternal::from(alice.dhs.public.to_bytes());
-    
+
     tx_3.store_message(&public_key_internal, &MessageType::Sent, &message1);
     tx_3.commit();
 
@@ -270,7 +270,7 @@ fn messaging_test_unordered_message() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages = tx_4
-        .retrieve_message_for_recipient(&public_key_internal)
+        .retrieve_message_for_public_key(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages.len(), 1);
@@ -324,7 +324,7 @@ fn messaging_test_unordered_message() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages_retrieved_2 = tx_6
-        .retrieve_message_for_recipient(&public_key_internal)
+        .retrieve_message_for_public_key(&public_key_internal)
         .expect("Failed to retrieve messages from db.");
 
     assert_eq!(messages_retrieved_2.len(), 2);
@@ -351,5 +351,5 @@ fn messaging_test_unordered_message() {
     );
 
     assert_eq!(&plain_text, &message1.as_bytes());
-    cleanup_test_db(tx_6)
+    //cleanup_test_db(tx_6)
 }

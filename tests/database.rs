@@ -1,17 +1,17 @@
 mod common;
 
 use crate::common::*;
-use gabber_chat_lib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
-use gabber_chat_lib::libs::encryption::double_ratchet::{RealKeyGenerator, SymmetricChainState};
-use gabber_chat_lib::libs::storage::database::database::DATABASE;
-use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::database::storage_traits::{
-    MessageStore, SessionStore, SymmetricChainStore, Transactional, UserStore,
-};
-use gabber_chat_lib::libs::storage::records::{SessionRecord, UserRecord};
-use gabber_chat_lib::*;
 use std::sync::Once;
 use uuid::Uuid;
+use ChatLib::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
+use ChatLib::libs::encryption::double_ratchet::{RealKeyGenerator, SymmetricChainState};
+use ChatLib::libs::storage::database::database::DATABASE;
+use ChatLib::libs::storage::database::storage_sqllite::SqliteTransaction;
+use ChatLib::libs::storage::database::storage_traits::{
+    MessageStore, SessionStore, SymmetricChainStore, Transactional, UserStore,
+};
+use ChatLib::libs::storage::records::{SessionRecord, UserRecord};
+use ChatLib::*;
 
 static TEST_DIR: &str = "./tests/test_db_dir";
 static INIT: Once = Once::new();
@@ -97,7 +97,6 @@ fn test_storing_retrieving_message() {
     let bob_username = "BOB".to_string();
     let public_key = PublicKeyInternal::from([1; 32]);
 
-
     tx_1.create_user(bob_username.clone(), &public_key)
         .expect("Failed to create BOB");
 
@@ -122,7 +121,7 @@ fn test_storing_retrieving_message() {
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");
 
     let messages = tx_3
-        .retrieve_message_for_recipient(&bob_user.public_key)
+        .retrieve_message_for_public_key(&bob_user.public_key)
         .expect("Failed to retrieve message");
 
     assert_eq!(messages.len(), 1);
@@ -146,7 +145,6 @@ fn test_symmetric_chain_storage() {
     let bob_username = "BOB".to_string();
     let bob_device_identity = IdentityKey::from([2; 16]);
     let public_key = PublicKeyInternal::from([1; 32]);
-
 
     let mut tx_1 =
         SqliteTransaction::new(&mut connection).expect("Failed to create SQLITE TRANSACTION");

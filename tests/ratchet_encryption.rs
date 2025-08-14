@@ -2,10 +2,10 @@ mod common;
 
 use crate::common::*;
 use crate::libs::encryption::double_ratchet::*;
-use gabber_chat_lib::*;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use std::path::Path;
+use ChatLib::*;
 
 #[test]
 fn test_encryption_decryption() {

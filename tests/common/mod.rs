@@ -1,14 +1,14 @@
-use gabber_chat_lib::init_database;
-use gabber_chat_lib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
-use gabber_chat_lib::libs::storage::database::database::DATABASE;
-use gabber_chat_lib::libs::storage::database::storage_sqllite::SqliteTransaction;
-use gabber_chat_lib::libs::storage::database::storage_traits::Transactional;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use rusqlite::Connection;
 use std::fs;
 use std::path::Path;
 use std::sync::Once;
+use ChatLib::init_database;
+use ChatLib::libs::encryption::double_ratchet::{DHKeyGenerator, DoubleRatchet};
+use ChatLib::libs::storage::database::database::DATABASE;
+use ChatLib::libs::storage::database::storage_sqllite::SqliteTransaction;
+use ChatLib::libs::storage::database::storage_traits::Transactional;
 
 pub fn aaa_init(init: &Once, dir: &str, prefix: &str) {
     init.call_once(|| {

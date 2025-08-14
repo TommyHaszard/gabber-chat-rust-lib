@@ -1,11 +1,12 @@
+use crate::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 use crate::libs::encryption::double_ratchet::{
     DoubleRatchet, KeySecret, MessageId, SymmetricChainState,
 };
-use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::libs::storage::database::storage_traits::{
     MessageStore, ProtocolStore, SessionStore, Storage, StoreError, SymmetricChainStore,
     Transactional, UserStore,
 };
+use crate::libs::storage::records::{MessageRecord, SessionRecord, UserRecord};
 use crate::DatabaseError;
 use bincode::config::standard;
 use r2d2::{Pool, PooledConnection};
@@ -15,7 +16,6 @@ use rusqlite::{params, Connection, Error, OptionalExtension, Result, Transaction
 use std::collections::HashMap;
 use uuid::Uuid;
 use x25519_dalek::PublicKey;
-use crate::libs::core::models::{IdentityKey, MessageType, PublicKeyInternal};
 
 pub struct SqliteTransaction<'conn> {
     tx: Transaction<'conn>,
@@ -85,7 +85,11 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
         Ok(())
     }
 
-    fn create_user(&mut self, username: String, public_key: &PublicKeyInternal) -> Result<(), StoreError> {
+    fn create_user(
+        &mut self,
+        username: String,
+        public_key: &PublicKeyInternal,
+    ) -> Result<(), StoreError> {
         // check username already exists and fail
 
         let count: i64 = self.tx.query_row(
@@ -123,19 +127,24 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
     }
 
     fn load_user_by_id(&mut self, user_id: &IdentityKey) -> Result<UserRecord, StoreError> {
-        let mut stmt = self.tx.prepare("SELECT user_id, username, public_key FROM user WHERE user_id = ?")?;
+        let mut stmt = self.tx.prepare(
+            "SELECT user_id, username, public_key, is_stale FROM users WHERE user_id = ?",
+        )?;
         let user = stmt.query_row([&user_id], |row| {
             Ok(UserRecord {
                 user_id: row.get(0)?,
-                public_key: row.get(1)?,
-                username: row.get(2)?,
+                username: row.get(1)?,
+                public_key: row.get(2)?,
                 is_stale: row.get(3)?,
             })
         })?;
         Ok(user)
     }
 
-    fn load_user_by_device_id(&mut self, device_id: &IdentityKey) -> std::result::Result<UserRecord, StoreError> {
+    fn load_user_by_device_id(
+        &mut self,
+        device_id: &IdentityKey,
+    ) -> std::result::Result<UserRecord, StoreError> {
         let mut stmt = self
             .tx
             .prepare("SELECT user_id FROM devices WHERE device_id = ?")?;
@@ -145,17 +154,21 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
         })?;
         // close this stmt to allow reborrow
         match stmt.finalize() {
-            Ok(_) => {
-                self.load_user_by_id(&user_identity_key)
-            },
-            Err(stmt_error) => {
-                Err(StoreError::Transaction(format!("Failed to close stmt for retrieving User_Id from Device_id from table Device: {}", stmt_error)))
-            }
+            Ok(_) => self.load_user_by_id(&user_identity_key),
+            Err(stmt_error) => Err(StoreError::Transaction(format!(
+                "Failed to close stmt for retrieving User_Id from Device_id from table Device: {}",
+                stmt_error
+            ))),
         }
     }
 
-    fn load_user_by_pub_key(&mut self, pub_key: &PublicKeyInternal) -> std::result::Result<UserRecord, StoreError> {
-        let mut stmt = self.tx.prepare("SELECT user_id, public_key, username, is_stale FROM user WHERE public_key = ?")?;
+    fn load_user_by_pub_key(
+        &mut self,
+        pub_key: &PublicKeyInternal,
+    ) -> std::result::Result<UserRecord, StoreError> {
+        let mut stmt = self.tx.prepare(
+            "SELECT user_id, public_key, username, is_stale FROM users WHERE public_key = ?",
+        )?;
         let user = stmt.query_row([&pub_key], |row| {
             Ok(UserRecord {
                 user_id: row.get(0)?,
@@ -165,7 +178,6 @@ impl<'conn> UserStore for SqliteTransaction<'conn> {
             })
         })?;
         Ok(user)
-
     }
 }
 
@@ -353,7 +365,7 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
         Ok(())
     }
 
-    fn retrieve_message_for_recipient(
+    fn retrieve_message_for_public_key(
         &mut self,
         peer: &PublicKeyInternal,
     ) -> std::result::Result<Vec<MessageRecord>, StoreError> {
@@ -382,15 +394,15 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
 
     fn load_recent_messages_per_user(&mut self) -> Result<Vec<MessageRecord>, StoreError> {
         let mut stmt = self.tx.prepare(
-           "WITH RankedMessages AS (
+            "WITH RankedMessages AS (
                       SELECT
                         m.message_id,
-                        m.recipient_id,
+                        m.public_key,
                         m.message_type,
                         m.content,
                         m.created_at,
                         ROW_NUMBER() OVER (
-                          PARTITION BY m.recipient_id
+                          PARTITION BY m.public_key
                           ORDER BY
                             m.created_at DESC
                         ) AS rn
@@ -399,7 +411,7 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
                     )
                     SELECT
                       rm.message_id,
-                      rm.recipient_id,
+                      rm.public_key,
                       rm.message_type,
                       rm.content,
                       rm.created_at
@@ -417,7 +429,7 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
                 Ok(MessageRecord::from_db(
                     row.get(0)?,
                     row.get(1)?,
-                     MessageType::from(row.get(2)?),
+                    MessageType::from(row.get(2)?),
                     row.get(3)?,
                     row.get(4)?,
                 ))
@@ -425,8 +437,24 @@ impl<'conn> MessageStore for SqliteTransaction<'conn> {
             .collect()?;
 
         Ok(messages)
-
     }
+
+    fn save_message(&mut self, public_key: &PublicKeyInternal, message: MessageRecord) -> Result<(), StoreError> {
+        self.tx
+            .execute(
+                "INSERT INTO messages(message_id, public_key, message_type, content) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    message.message_id,
+                    message.recipient_public_key,
+                    message.message_type,
+                    message.content
+                ],
+            )
+            .map_err(|e| DatabaseError::StorageError(e.to_string()))?;
+
+        Ok(())
+    }
+
 }
 
 pub fn generate_chain_record_id(session_id: &IdentityKey, chain_identifier: &str) -> String {

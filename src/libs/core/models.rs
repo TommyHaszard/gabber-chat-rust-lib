@@ -1,11 +1,22 @@
+use std::fmt;
 use hmac::digest::typenum::Mod;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::ToSql;
 use uuid::Uuid;
+use crate::DatabaseError;
 
 pub enum ModelError {
-    ConversionError(String),
+    ConversionError(String, usize),
 }
+
+impl fmt::Display for ModelError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ModelError::ConversionError(str,len) => write!(f, "{}- len: {}", str, len),
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, PartialEq, Hash, Eq)]
 pub struct IdentityKey {
@@ -21,12 +32,23 @@ impl TryFrom<Vec<u8>> for IdentityKey {
 }
 
 fn identity_key_from_vec(vec: Vec<u8>) -> Result<IdentityKey, ModelError> {
-    if vec.len() != 16 {
-        return Err(ModelError::ConversionError("Vec Length greater then 16 bytes.".to_string()));
+    let len = vec.len();
+    if len > 16 {
+        return Err(ModelError::ConversionError(
+            "Vec Length greater then 16 bytes.".to_string(), len,
+        ));
     }
 
-    let bytes: [u8; 16] = vec.try_into().map_err(|_| ModelError::ConversionError("Vec Length greater then 16 bytes.".to_string()))?;
+    if len < 16 {
+        return Err(ModelError::ConversionError(
+            "Vec Length less then 16 bytes.".to_string(), len,
+        ));
+    }
     
+    let bytes: [u8; 16] = vec.try_into().map_err(|_| {
+        ModelError::ConversionError("Vec Length greater then 16 bytes.".to_string(), len)
+    })?;
+
     Ok(IdentityKey::from(bytes))
 }
 
@@ -60,8 +82,7 @@ impl FromSql for IdentityKey {
     }
 }
 
-#[derive(Debug, Clone, Hash, )]
-#[derive(Eq, PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct PublicKeyInternal {
     pub bytes: Vec<u8>,
 }
@@ -73,10 +94,11 @@ impl From<Vec<u8>> for PublicKeyInternal {
 
 impl From<[u8; 32]> for PublicKeyInternal {
     fn from(bytes: [u8; 32]) -> PublicKeyInternal {
-        PublicKeyInternal { bytes: bytes.into() }
+        PublicKeyInternal {
+            bytes: bytes.into(),
+        }
     }
 }
-
 
 impl ToSql for PublicKeyInternal {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
@@ -90,7 +112,6 @@ impl FromSql for PublicKeyInternal {
         Ok(PublicKeyInternal { bytes })
     }
 }
-
 
 #[derive(Debug, PartialEq)]
 pub enum MessageType {

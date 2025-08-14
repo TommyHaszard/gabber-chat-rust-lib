@@ -145,30 +145,30 @@ pub fn db_migration(path: String) -> Result<(), DatabaseError> {
         .map_err(|e| DatabaseError::InitializationError(e.to_string()))
         .unwrap();
 
-    sqlite_transaction
-        .inner()
-        .execute(
-            "INSERT INTO app_settings (key, value) VALUES
-                ('max_relay_hops', '3'),
-                ('bluetooth_discovery_interval', '300'),
-                ('message_retention_days', '90'),
-                ('app_version', '0.0.1');",
-            [],
-        )
-        .map_err(|e| DatabaseError::InitializationError(e.to_string()))
-        .unwrap();
-
-    sqlite_transaction.inner().execute(
-        "CREATE TRIGGER IF NOT EXISTS cleanup_old_messages
-            AFTER UPDATE ON app_settings
-            WHEN NEW.key = 'message_retention_days'
-            BEGIN
-                DELETE FROM Messages
-                WHERE created_at < strftime('%s', 'now') - (NEW.value * 86400)
-                AND conversation_id NOT IN (SELECT conversation_id FROM Conversations WHERE is_pinned = 1);
-            END;",
-        [],
-    ).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
+    // sqlite_transaction
+    //     .inner()
+    //     .execute(
+    //         "INSERT INTO app_settings (key, value) VALUES
+    //             ('max_relay_hops', '3'),
+    //             ('bluetooth_discovery_interval', '300'),
+    //             ('message_retention_days', '90'),
+    //             ('app_version', '0.0.1');",
+    //         [],
+    //     )
+    //     .map_err(|e| DatabaseError::InitializationError(e.to_string()))
+    //     .unwrap();
+    //
+    // sqlite_transaction.inner().execute(
+    //     "CREATE TRIGGER IF NOT EXISTS cleanup_old_messages
+    //         AFTER UPDATE ON app_settings
+    //         WHEN NEW.key = 'message_retention_days'
+    //         BEGIN
+    //             DELETE FROM Messages
+    //             WHERE created_at < strftime('%s', 'now') - (NEW.value * 86400)
+    //             AND conversation_id NOT IN (SELECT conversation_id FROM Conversations WHERE is_pinned = 1);
+    //         END;",
+    //     [],
+    // ).map_err(|e| DatabaseError::InitializationError(e.to_string()))?;
 
     sqlite_transaction.commit().map_err(|err| {
         DatabaseError::InitializationError("Could not commit inital db.".to_string())

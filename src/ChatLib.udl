@@ -1,0 +1,15 @@
+namespace ChatLib {
+// Initialize the database
+    //[Throws=DatabaseError]
+    //void init_database(string path);
+
+   // [Throws=DatabaseError]
+   // void create_user(string name, sequence<u8> public_key);
+
+    //[Throws=DatabaseError]
+    //void send_message(string receiver, string content);
+
+    //sequence<string> sync_with_peer(string peer_id);
+
+    //boolean mark_messages_as_seen(sequence<string> message_ids);
+};
